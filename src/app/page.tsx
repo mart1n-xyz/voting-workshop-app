@@ -19,8 +19,23 @@ function Home() {
   if (!authenticated) {
     return (
       <>
-        <section className="w-full flex flex-row justify-center items-center h-screen bg-gray-100">
-          <div className="flex flex-col items-center justify-center w-full h-full space-y-8">
+        <section className="w-full flex flex-row justify-center items-center h-screen bg-gray-100 relative overflow-hidden">
+          {/* Dot-dash lines background */}
+          <div className="absolute inset-0 w-full h-full pointer-events-none">
+            {[...Array(120)].map((_, i) => (
+              <div
+                key={i}
+                className="absolute w-full h-[2px]"
+                style={{
+                  top: `${i * 0.833}%`,
+                  left: i % 2 === 0 ? '0' : '10.5px',
+                  backgroundImage: 'repeating-linear-gradient(90deg, #D1D5DB 0px, #D1D5DB 3px, transparent 3px, transparent 7px, #D1D5DB 7px, #D1D5DB 17px, transparent 17px, transparent 21px)',
+                }}
+              />
+            ))}
+          </div>
+          
+          <div className="flex flex-col items-center justify-center w-full h-full space-y-8 relative z-10">
             <div className="flex h-10 items-center justify-center rounded-full border-2 border-gray-400 px-6 text-base text-gray-700 font-medium bg-white/50">
               FtC BA Workshop
             </div>

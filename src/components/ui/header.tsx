@@ -32,18 +32,33 @@ export function Header() {
   };
 
   return (
-    <header className="h-[60px] flex flex-row justify-between items-center px-4 md:px-6 border-b bg-gray-200 border-gray-300">
-      <div className="flex flex-row items-center gap-2 flex-shrink-0">
-        <h1 className="text-sm md:text-base font-semibold text-gray-800">
-          <span className="hidden sm:inline">FtC BA: Live Voting Session</span>
-          <span className="sm:hidden">FtC Workshop</span>
+    <header className="h-[60px] flex flex-row justify-between items-center px-4 md:px-6 bg-gray-100 relative overflow-hidden">
+      {/* Dot-dash lines background */}
+      <div className="absolute inset-0 w-full h-full pointer-events-none">
+        {[...Array(8)].map((_, i) => (
+          <div
+            key={i}
+            className="absolute w-full h-[2px]"
+            style={{
+              top: `${i * 12.5}%`,
+              left: i % 2 === 0 ? '0' : '10.5px',
+              backgroundImage: 'repeating-linear-gradient(90deg, #D1D5DB 0px, #D1D5DB 3px, transparent 3px, transparent 7px, #D1D5DB 7px, #D1D5DB 17px, transparent 17px, transparent 21px)',
+            }}
+          />
+        ))}
+      </div>
+      
+      <div className="flex flex-row items-center gap-2 flex-shrink-0 relative z-10">
+        <h1 className="text-sm md:text-base font-semibold text-gray-800 inline-block">
+          <span className="hidden sm:inline bg-gray-100 px-2 py-0.5">FtC BA: Live Voting Session</span>
+          <span className="sm:hidden bg-gray-100 px-2 py-0.5">FtC Workshop</span>
         </h1>
       </div>
 
-      <nav className="flex flex-row items-center gap-6 md:gap-8">
+      <nav className="flex flex-row items-center gap-6 md:gap-8 relative z-10">
         <Link
           href="/"
-          className={`text-sm font-medium transition-colors duration-200 cursor-pointer ${
+          className={`text-sm font-medium transition-colors duration-200 cursor-pointer bg-gray-100 px-2 py-1 ${
             pathname === "/" 
               ? "text-gray-900" 
               : "text-gray-600 hover:text-gray-900"
@@ -53,7 +68,7 @@ export function Header() {
         </Link>
         <Link
           href="/cheatsheet"
-          className={`text-sm font-medium transition-colors duration-200 cursor-pointer ${
+          className={`text-sm font-medium transition-colors duration-200 cursor-pointer bg-gray-100 px-2 py-1 ${
             pathname === "/cheatsheet" 
               ? "text-gray-900" 
               : "text-gray-600 hover:text-gray-900"
@@ -64,7 +79,7 @@ export function Header() {
       </nav>
 
       {authenticated && ethereumWallet && (
-        <div className="flex flex-row justify-end items-center gap-3 md:gap-4 flex-shrink-0">
+        <div className="flex flex-row justify-end items-center gap-3 md:gap-4 flex-shrink-0 relative z-10">
           <button
             onClick={copyAddress}
             className="font-mono text-xs md:text-sm text-gray-700 px-3 py-1.5 bg-white/60 rounded-lg hover:bg-white/90 transition-all duration-200 cursor-pointer"
@@ -73,7 +88,7 @@ export function Header() {
             {abbreviateAddress(ethereumWallet.address)}
           </button>
           <button 
-            className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors duration-200 cursor-pointer" 
+            className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors duration-200 cursor-pointer bg-gray-100 px-2 py-1" 
             onClick={logout}
           >
             Logout
@@ -81,7 +96,7 @@ export function Header() {
         </div>
       )}
       
-      {!authenticated && <div className="w-[100px] flex-shrink-0" />}
+      {!authenticated && <div className="w-[100px] flex-shrink-0 relative z-10" />}
     </header>
   );
 }
