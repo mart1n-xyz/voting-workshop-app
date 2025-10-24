@@ -1,39 +1,50 @@
-import { ArrowRightIcon, ArrowUpRightIcon } from "@heroicons/react/16/solid";
-import { PrivyLogo } from "./privy-logo";
+"use client";
+
+import { usePrivy } from "@privy-io/react-auth";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 export function Header() {
+  const { authenticated, logout } = usePrivy();
+  const pathname = usePathname();
+
   return (
-    <header className="h-[60px] flex flex-row justify-between items-center px-6 border-b bg-white border-[#E2E3F0]">
-      <div className="flex flex-row items-center gap-2 h-[26px]">
-        <PrivyLogo className="w-[103.48px] h-[23.24px]" />
-
-        <div className="text-medium flex h-[22px] items-center justify-center rounded-[11px] border border-primary px-[0.375rem] text-[0.75rem] text-primary">
-          Next.js Demo
-        </div>
+    <header className="h-[60px] flex flex-row justify-between items-center px-4 md:px-6 border-b bg-white border-[#E2E3F0]">
+      <div className="flex flex-row items-center gap-2 h-[26px] flex-shrink-0">
+        <h1 className="text-sm md:text-lg font-semibold text-gray-900">
+          <span className="hidden sm:inline">FtC Workshop: Live Voting App</span>
+          <span className="sm:hidden">FtC Workshop</span>
+        </h1>
       </div>
 
-      <div className="flex flex-row justify-end items-center gap-4 h-9">
-        <a
-          className="text-primary flex flex-row items-center gap-1 cursor-pointer"
-          href="https://docs.privy.io/basics/react/installation"
-          target="_blank"
-          rel="noreferrer"
+      <nav className="flex flex-row items-center gap-4 md:gap-6">
+        <Link
+          href="/"
+          className={`text-sm md:text-base font-medium transition-colors hover:text-primary ${
+            pathname === "/" ? "text-primary" : "text-gray-600"
+          }`}
         >
-          Docs <ArrowUpRightIcon className="h-4 w-4" strokeWidth={2} />
-        </a>
+          Home
+        </Link>
+        <Link
+          href="/cheatsheet"
+          className={`text-sm md:text-base font-medium transition-colors hover:text-primary ${
+            pathname === "/cheatsheet" ? "text-primary" : "text-gray-600"
+          }`}
+        >
+          Cheatsheet
+        </Link>
+      </nav>
 
-        <button className="button-primary rounded-full hidden md:block">
-          <a
-            className="flex flex-row items-center gap-2"
-            href="https://dashboard.privy.io/"
-            target="_blank"
-            rel="noreferrer"
-          >
-            <span> Go to dashboard</span>
-            <ArrowRightIcon className="h-4 w-4" strokeWidth={2} />
-          </a>
-        </button>
-      </div>
+      {authenticated && (
+        <div className="flex flex-row justify-end items-center gap-4 h-9 flex-shrink-0">
+          <button className="button text-sm md:text-base" onClick={logout}>
+            Logout
+          </button>
+        </div>
+      )}
+      
+      {!authenticated && <div className="w-[100px] flex-shrink-0" />}
     </header>
   );
 }
