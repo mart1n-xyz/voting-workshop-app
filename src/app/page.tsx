@@ -1,19 +1,126 @@
 "use client";
 
-import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { usePrivy, useWallets, useSendTransaction } from "@privy-io/react-auth";
 import { ToastContainer } from "react-toastify";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Header } from "@/components/ui/header";
 import { FullScreenLoader } from "@/components/ui/fullscreen-loader";
-import { showSuccessToast } from "@/components/ui/custom-toast";
+import { showSuccessToast, showErrorToast } from "@/components/ui/custom-toast";
+import { createPublicClient, http, encodeFunctionData } from "viem";
+import { statusNetworkSepolia } from "viem/chains";
+
+const CONTRACT_ADDRESS = "0x89A0dE2bEB75D6fF16a7B0c41cf83cd402a2da93";
+
+const VOTING_WORKSHOP_ABI = [
+  {
+    inputs: [],
+    name: "register",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "address", name: "", type: "address" }],
+    name: "addressToId",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
 
 function Home() {
-  const { ready, authenticated, login } = usePrivy();
+  const { ready, authenticated, login, user } = usePrivy();
   const { wallets } = useWallets();
+  const { sendTransaction } = useSendTransaction();
+  const router = useRouter();
   const [copied, setCopied] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [isCheckingRegistration, setIsCheckingRegistration] = useState(true);
 
-  if (!ready) {
+  // Check if user is already registered
+  useEffect(() => {
+    async function checkRegistration() {
+      if (!ready || !authenticated || !user) {
+        setIsCheckingRegistration(false);
+        return;
+      }
+
+      try {
+        const walletAddress = user.wallet?.address;
+        if (!walletAddress) {
+          setIsCheckingRegistration(false);
+          return;
+        }
+
+        const publicClient = createPublicClient({
+          chain: statusNetworkSepolia,
+          transport: http("https://public.sepolia.rpc.status.network"),
+        });
+
+        const id = await publicClient.readContract({
+          address: CONTRACT_ADDRESS,
+          abi: VOTING_WORKSHOP_ABI,
+          functionName: "addressToId",
+          args: [walletAddress as `0x${string}`],
+        });
+
+        if (id !== BigInt(0)) {
+          // User is already registered, redirect to voting booth
+          router.push("/voting-booth");
+        } else {
+          setIsCheckingRegistration(false);
+        }
+      } catch (error) {
+        console.error("Error checking registration:", error);
+        setIsCheckingRegistration(false);
+      }
+    }
+
+    checkRegistration();
+  }, [ready, authenticated, user, router]);
+
+  const handleRegister = async () => {
+    if (!ethereumWallet?.address) {
+      showErrorToast("No wallet found");
+      return;
+    }
+
+    setIsRegistering(true);
+
+    try {
+      // Encode the register function call
+      const data = encodeFunctionData({
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "register",
+      });
+
+      // Send the transaction
+      const txHash = await sendTransaction({
+        to: CONTRACT_ADDRESS,
+        data: data,
+        value: BigInt(0),
+      });
+
+      showSuccessToast("Registration successful! Redirecting...");
+      
+      // Wait a bit for the transaction to be processed
+      setTimeout(() => {
+        router.push("/voting-booth");
+      }, 2000);
+    } catch (error: any) {
+      console.error("Registration error:", error);
+      showErrorToast(error?.message || "Registration failed. Please try again.");
+      setIsRegistering(false);
+    }
+  };
+
+  if (!ready || (authenticated && isCheckingRegistration)) {
     return <FullScreenLoader />;
+  }
+
+  if (isRegistering) {
+    return <FullScreenLoader message="Registering..." />;
   }
 
   if (!authenticated) {
@@ -157,8 +264,12 @@ function Home() {
             </div>
 
             <div className="pt-8">
-              <button className="bg-gray-900 text-white border-2 border-gray-900 px-8 py-4 rounded-full text-lg font-medium transition-all duration-300 hover:bg-transparent hover:text-gray-900">
-                Get Started
+              <button 
+                onClick={handleRegister}
+                disabled={isRegistering || !ethereumWallet}
+                className="bg-gray-900 text-white border-2 border-gray-900 px-8 py-4 rounded-full text-lg font-medium transition-all duration-300 hover:bg-transparent hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isRegistering ? "Registering..." : "Get Your Participant ID"}
               </button>
             </div>
           </div>
