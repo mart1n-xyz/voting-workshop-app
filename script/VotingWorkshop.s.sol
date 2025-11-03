@@ -2,37 +2,37 @@
 pragma solidity ^0.8.23;
 
 import {Script, console} from "forge-std/Script.sol";
-import {Voting} from "../src/Voting.sol";
+import {VotingWorkshop} from "../src/VotingWorkshop.sol";
 
 /**
- * @title Deploy Voting Contract
- * @dev Script to deploy the Voting contract to Status Network Sepolia
+ * @title Deploy VotingWorkshop Contract
+ * @dev Script to deploy the VotingWorkshop contract to Status Network Sepolia
  * 
  * Usage:
  * source .env
- * forge script script/Voting.s.sol:DeployVoting --rpc-url status_sepolia --broadcast -vvvv
+ * forge script script/VotingWorkshop.s.sol:DeployVotingWorkshop --rpc-url status_sepolia --broadcast -vvvv
  * 
  * Make sure your .env file has:
  * RPC_ENDPOINT=https://public.sepolia.rpc.status.network
  * PRIVATE_KEY=your_private_key_here
  */
-contract DeployVoting is Script {
-    function run() external returns (Voting) {
+contract DeployVotingWorkshop is Script {
+    function run() external returns (VotingWorkshop) {
         // Get the deployer's private key from environment
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         
         // Start broadcasting transactions
         vm.startBroadcast(deployerPrivateKey);
         
-        // Deploy the Voting contract
-        Voting voting = new Voting();
+        // Deploy the VotingWorkshop contract
+        VotingWorkshop workshop = new VotingWorkshop();
         
-        console.log("Voting contract deployed to:", address(voting));
+        console.log("VotingWorkshop contract deployed to:", address(workshop));
         
         // Stop broadcasting
         vm.stopBroadcast();
         
-        return voting;
+        return workshop;
     }
 }
 
