@@ -1,15 +1,16 @@
 "use client";
 
-import { usePrivy } from "@privy-io/react-auth";
+import { usePrivy, useSendTransaction } from "@privy-io/react-auth";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Header } from "@/components/ui/header";
 import { FullScreenLoader } from "@/components/ui/fullscreen-loader";
-import { createPublicClient, http } from "viem";
+import { createPublicClient, http, encodeFunctionData } from "viem";
 import { statusNetworkSepolia } from "viem/chains";
 import { CheckCircleIcon } from "@heroicons/react/24/solid";
-
-const CONTRACT_ADDRESS = "0x0918E5b67187400548571D372D381C4bB4B9B27b";
+import { ToastContainer } from "react-toastify";
+import { showSuccessToast, showErrorToast } from "@/components/ui/custom-toast";
+import { getVoteConfig, VOTING_CONTRACT_ADDRESS } from "@/config/votesConfig";
 
 const VOTING_WORKSHOP_ABI = [
   {
@@ -19,17 +20,46 @@ const VOTING_WORKSHOP_ABI = [
     stateMutability: "view",
     type: "function",
   },
+  {
+    inputs: [
+      { internalType: "uint256", name: "electionId", type: "uint256" },
+      { internalType: "uint256", name: "choice", type: "uint256" }
+    ],
+    name: "castPublicVote",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "uint256", name: "electionId", type: "uint256" },
+      { internalType: "address", name: "userAddress", type: "address" }
+    ],
+    name: "hasUserVoted",
+    outputs: [{ internalType: "bool", name: "", type: "bool" }],
+    stateMutability: "view",
+    type: "function",
+  },
 ] as const;
 
 export default function VotingBooth() {
   const { ready, authenticated, user } = usePrivy();
+  const { sendTransaction } = useSendTransaction();
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [task1Complete, setTask1Complete] = useState(false);
+  
+  // Vote 0 state
+  const [selectedOption, setSelectedOption] = useState<number | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasVoted, setHasVoted] = useState(false);
+  const [userVote, setUserVote] = useState<number | null>(null);
+  
+  const vote0Config = getVoteConfig("vote0");
 
   useEffect(() => {
-    async function checkRegistration() {
+    async function checkRegistrationAndVotes() {
       if (!ready || !authenticated || !user) return;
 
       try {
@@ -48,7 +78,7 @@ export default function VotingBooth() {
 
         // Check if user is registered
         const id = await publicClient.readContract({
-          address: CONTRACT_ADDRESS,
+          address: VOTING_CONTRACT_ADDRESS,
           abi: VOTING_WORKSHOP_ABI,
           functionName: "addressToId",
           args: [walletAddress as `0x${string}`],
@@ -59,6 +89,44 @@ export default function VotingBooth() {
           router.push("/");
         } else {
           setUserId(id.toString());
+          
+          // Check if user has voted in vote 0
+          if (vote0Config) {
+            const voted = await publicClient.readContract({
+              address: VOTING_CONTRACT_ADDRESS,
+              abi: VOTING_WORKSHOP_ABI,
+              functionName: "hasUserVoted",
+              args: [BigInt(vote0Config.electionId), walletAddress as `0x${string}`],
+            });
+            
+            setHasVoted(voted);
+            
+            // If voted, get their vote choice
+            if (voted) {
+              const publicVotesABI = [
+                {
+                  inputs: [
+                    { internalType: "uint256", name: "", type: "uint256" },
+                    { internalType: "uint256", name: "", type: "uint256" }
+                  ],
+                  name: "publicVotes",
+                  outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+                  stateMutability: "view",
+                  type: "function",
+                },
+              ] as const;
+              
+              const choice = await publicClient.readContract({
+                address: VOTING_CONTRACT_ADDRESS,
+                abi: publicVotesABI,
+                functionName: "publicVotes",
+                args: [BigInt(vote0Config.electionId), id],
+              });
+              
+              setUserVote(Number(choice));
+            }
+          }
+          
           setLoading(false);
         }
       } catch (error) {
@@ -67,8 +135,42 @@ export default function VotingBooth() {
       }
     }
 
-    checkRegistration();
-  }, [ready, authenticated, user, router]);
+    checkRegistrationAndVotes();
+  }, [ready, authenticated, user, router, vote0Config]);
+
+  const handleVoteSubmit = async () => {
+    if (selectedOption === null || !vote0Config) {
+      showErrorToast("Please select an option");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      // Encode the castPublicVote function call
+      const data = encodeFunctionData({
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "castPublicVote",
+        args: [BigInt(vote0Config.electionId), BigInt(selectedOption)],
+      });
+
+      // Send the transaction
+      await sendTransaction({
+        to: VOTING_CONTRACT_ADDRESS,
+        data: data,
+        value: BigInt(0),
+      });
+
+      showSuccessToast("Vote submitted successfully!");
+      setHasVoted(true);
+      setUserVote(selectedOption);
+    } catch (error: any) {
+      console.error("Vote submission error:", error);
+      showErrorToast(error?.message || "Failed to submit vote. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   if (!ready || loading) {
     return <FullScreenLoader />;
@@ -77,6 +179,14 @@ export default function VotingBooth() {
   if (!authenticated) {
     router.push("/");
     return <FullScreenLoader />;
+  }
+
+  if (isSubmitting) {
+    return <FullScreenLoader message="Submitting your vote..." />;
+  }
+
+  if (!vote0Config) {
+    return <div className="p-8 text-center">Error: Vote configuration not found</div>;
   }
 
   return (
@@ -168,49 +278,92 @@ export default function VotingBooth() {
             )}
           </div>
 
-          {/* Task 2: First Vote */}
+          {/* Task 2: Vote 0 - Training Ground */}
           <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
             task1Complete ? "border-gray-200" : "border-gray-100 opacity-50"
           }`}>
             <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
-              <div className="w-7 h-7 rounded-full border-2 border-gray-400 flex items-center justify-center bg-white">
-                <span className="text-sm font-bold text-gray-600">2</span>
-              </div>
+              {hasVoted ? (
+                <CheckCircleIcon className="w-7 h-7 text-green-600" />
+              ) : (
+                <div className="w-7 h-7 rounded-full border-2 border-gray-400 flex items-center justify-center bg-white">
+                  <span className="text-sm font-bold text-gray-600">2</span>
+                </div>
+              )}
               <div className="flex-1">
                 <h2 className="text-xl font-bold text-gray-900">
-                  First Vote
+                  {vote0Config.title}
                 </h2>
                 {!task1Complete && (
                   <p className="text-sm text-gray-500">Complete previous task to unlock</p>
+                )}
+                {hasVoted && (
+                  <p className="text-sm text-green-600 font-medium">Voted</p>
                 )}
               </div>
             </div>
 
             {task1Complete && (
               <div className="p-8 space-y-6">
-                <div className="space-y-4">
-                  <p className="text-lg text-gray-700">
-                    <strong>Question:</strong> What is your preferred blockchain network for development?
-                  </p>
-
-                  <div className="space-y-3">
-                    {["Ethereum", "Polygon", "Arbitrum", "Optimism", "Status Network"].map((option) => (
-                      <button
-                        key={option}
-                        className="w-full text-left px-6 py-4 bg-gray-50 border-2 border-gray-200 rounded-xl hover:border-gray-900 hover:bg-white transition-all duration-200 font-medium text-gray-900"
-                      >
-                        {option}
-                      </button>
-                    ))}
+                {vote0Config.isPractice && (
+                  <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
+                    <p className="text-sm text-yellow-800 font-medium">
+                      🎯 Practice Vote — No points or consequences
+                    </p>
                   </div>
-                </div>
+                )}
 
-                <button
-                  disabled
-                  className="w-full bg-gray-300 text-gray-500 px-8 py-4 rounded-xl text-lg font-semibold cursor-not-allowed"
-                >
-                  Submit Vote (Coming Soon)
-                </button>
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-lg font-bold text-gray-900 mb-2">
+                      {vote0Config.question}
+                    </p>
+                    {vote0Config.context && (
+                      <p className="text-gray-600">
+                        {vote0Config.context}
+                      </p>
+                    )}
+                  </div>
+
+                  {hasVoted ? (
+                    <div className="space-y-4">
+                      <div className="bg-green-50 border-2 border-green-200 rounded-xl p-6 text-center">
+                        <p className="text-lg font-semibold text-green-800 mb-2">
+                          ✓ You voted!
+                        </p>
+                        <p className="text-gray-700">
+                          Your choice: <strong>{vote0Config.options.find(o => o.id === userVote)?.text}</strong>
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="space-y-3">
+                        {vote0Config.options.map((option) => (
+                          <button
+                            key={option.id}
+                            onClick={() => setSelectedOption(option.id)}
+                            className={`w-full text-left px-6 py-4 border-2 rounded-xl transition-all duration-200 font-medium ${
+                              selectedOption === option.id
+                                ? "border-gray-900 bg-gray-900 text-white"
+                                : "border-gray-200 bg-gray-50 text-gray-900 hover:border-gray-400 hover:bg-white"
+                            }`}
+                          >
+                            {option.text}
+                          </button>
+                        ))}
+                      </div>
+
+                      <button
+                        onClick={handleVoteSubmit}
+                        disabled={selectedOption === null || isSubmitting}
+                        className="w-full bg-gray-900 text-white px-8 py-4 rounded-xl text-lg font-semibold transition-all duration-300 hover:bg-gray-800 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isSubmitting ? "Submitting..." : "Submit Vote"}
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -231,6 +384,20 @@ export default function VotingBooth() {
           </div>
         </div>
       </main>
+      <ToastContainer
+        position="top-center"
+        autoClose={5000}
+        hideProgressBar
+        newestOnTop={false}
+        closeOnClick={false}
+        rtl={false}
+        pauseOnFocusLoss
+        draggable={false}
+        pauseOnHover
+        limit={1}
+        aria-label="Toast notifications"
+        style={{ top: 58 }}
+      />
     </div>
   );
 }

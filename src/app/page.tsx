@@ -9,8 +9,7 @@ import { FullScreenLoader } from "@/components/ui/fullscreen-loader";
 import { showSuccessToast, showErrorToast } from "@/components/ui/custom-toast";
 import { createPublicClient, http, encodeFunctionData } from "viem";
 import { statusNetworkSepolia } from "viem/chains";
-
-const CONTRACT_ADDRESS = "0x0918E5b67187400548571D372D381C4bB4B9B27b";
+import { VOTING_CONTRACT_ADDRESS } from "@/config/votesConfig";
 
 const VOTING_WORKSHOP_ABI = [
   {
@@ -59,7 +58,7 @@ function Home() {
         });
 
         const id = await publicClient.readContract({
-          address: CONTRACT_ADDRESS,
+          address: VOTING_CONTRACT_ADDRESS,
           abi: VOTING_WORKSHOP_ABI,
           functionName: "addressToId",
           args: [walletAddress as `0x${string}`],
@@ -97,7 +96,7 @@ function Home() {
 
       // Send the transaction
       const txHash = await sendTransaction({
-        to: CONTRACT_ADDRESS,
+        to: VOTING_CONTRACT_ADDRESS,
         data: data,
         value: BigInt(0),
       });

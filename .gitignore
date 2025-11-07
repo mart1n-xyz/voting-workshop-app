@@ -46,3 +46,5 @@ cache/
 out/
 broadcast/
 *.cache
+
+planned_votes.md
