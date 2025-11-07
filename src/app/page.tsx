@@ -10,7 +10,7 @@ import { showSuccessToast, showErrorToast } from "@/components/ui/custom-toast";
 import { createPublicClient, http, encodeFunctionData } from "viem";
 import { statusNetworkSepolia } from "viem/chains";
 
-const CONTRACT_ADDRESS = "0x89A0dE2bEB75D6fF16a7B0c41cf83cd402a2da93";
+const CONTRACT_ADDRESS = "0x0918E5b67187400548571D372D381C4bB4B9B27b";
 
 const VOTING_WORKSHOP_ABI = [
   {
