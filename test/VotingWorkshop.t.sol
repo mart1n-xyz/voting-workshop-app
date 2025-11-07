@@ -127,114 +127,6 @@ contract VotingWorkshopTest is Test {
         assertEq(workshop.idToAddress(999), address(0));
     }
 
-    function test_ExitRegistry() public {
-        // Register alice
-        vm.prank(alice);
-        workshop.register();
-        
-        assertEq(workshop.addressToId(alice), 1);
-        assertEq(workshop.idToAddress(1), alice);
-        assertTrue(workshop.isRegistered(alice));
-        
-        // Exit registry
-        vm.prank(alice);
-        workshop.exitRegistry();
-        
-        // Check that mappings are cleared
-        assertEq(workshop.addressToId(alice), 0);
-        assertEq(workshop.idToAddress(1), address(0));
-        assertFalse(workshop.isRegistered(alice));
-    }
-
-    function test_RevertWhen_ExitingWithoutRegistering() public {
-        // Try to exit without registering
-        vm.prank(alice);
-        vm.expectRevert("Not registered");
-        workshop.exitRegistry();
-    }
-
-    function test_RegisterAgainAfterExit() public {
-        // Register alice
-        vm.prank(alice);
-        workshop.register();
-        assertEq(workshop.addressToId(alice), 1);
-        
-        // Exit registry
-        vm.prank(alice);
-        workshop.exitRegistry();
-        assertEq(workshop.addressToId(alice), 0);
-        
-        // Register again - should get a new ID
-        vm.prank(alice);
-        workshop.register();
-        
-        // Alice gets a new ID (2, since counter doesn't reset)
-        assertEq(workshop.addressToId(alice), 2);
-        assertEq(workshop.idToAddress(2), alice);
-        assertTrue(workshop.isRegistered(alice));
-    }
-
-    function test_ExitRegistryEvent() public {
-        // Register first
-        vm.prank(alice);
-        workshop.register();
-        
-        // Expect exit event
-        vm.expectEmit(true, true, false, true);
-        emit VotingWorkshop.UserExited(alice, 1);
-        
-        vm.prank(alice);
-        workshop.exitRegistry();
-    }
-
-    function test_MultipleUsersCanExitAndRegisterIndependently() public {
-        // Alice and Bob register
-        vm.prank(alice);
-        workshop.register();
-        
-        vm.prank(bob);
-        workshop.register();
-        
-        assertEq(workshop.addressToId(alice), 1);
-        assertEq(workshop.addressToId(bob), 2);
-        
-        // Alice exits
-        vm.prank(alice);
-        workshop.exitRegistry();
-        
-        // Bob is still registered
-        assertEq(workshop.addressToId(bob), 2);
-        assertTrue(workshop.isRegistered(bob));
-        
-        // Alice is not registered
-        assertFalse(workshop.isRegistered(alice));
-        
-        // Alice can register again
-        vm.prank(alice);
-        workshop.register();
-        assertEq(workshop.addressToId(alice), 3); // Gets ID 3
-    }
-
-    function test_OldIdBecomesAvailableAfterExit() public {
-        // Register alice
-        vm.prank(alice);
-        workshop.register();
-        assertEq(workshop.addressToId(alice), 1);
-        assertEq(workshop.idToAddress(1), alice);
-        
-        // Exit
-        vm.prank(alice);
-        workshop.exitRegistry();
-        
-        // ID 1 mapping is cleared
-        assertEq(workshop.idToAddress(1), address(0));
-        
-        // Register Bob - he gets ID 2 (not ID 1, IDs are not reused)
-        vm.prank(bob);
-        workshop.register();
-        assertEq(workshop.addressToId(bob), 2);
-    }
-
     // ====== ELECTION MANAGEMENT TESTS ======
 
     function test_OpenNewElection() public {
@@ -656,6 +548,279 @@ contract VotingWorkshopTest is Test {
         uint256 electionId = workshop.openElection(0, false);
         
         assertFalse(workshop.hasUserVoted(electionId, alice)); // Unregistered returns false
+    }
+
+    // ====== PUBLIC VOTING TESTS ======
+
+    function test_CastPublicVote() public {
+        // Setup: Register user and open public election
+        vm.prank(alice);
+        workshop.register();
+        
+        uint256 electionId = workshop.openElection(0, true); // Public election
+        
+        // Cast vote for choice 1
+        vm.prank(alice);
+        workshop.castPublicVote(electionId, 1);
+        
+        // Check vote was recorded
+        assertTrue(workshop.hasVoted(electionId, 1));
+        assertTrue(workshop.hasUserVoted(electionId, alice));
+        assertEq(workshop.getVoteCount(electionId), 1);
+        assertEq(workshop.getPublicVote(electionId, 1), 1);
+        assertEq(workshop.getChoiceVoteCount(electionId, 1), 1);
+    }
+
+    function test_CastMultiplePublicVotes() public {
+        // Register users
+        vm.prank(alice);
+        workshop.register();
+        vm.prank(bob);
+        workshop.register();
+        vm.prank(charlie);
+        workshop.register();
+        
+        uint256 electionId = workshop.openElection(0, true);
+        
+        // Users vote for different choices
+        vm.prank(alice);
+        workshop.castPublicVote(electionId, 1);
+        
+        vm.prank(bob);
+        workshop.castPublicVote(electionId, 2);
+        
+        vm.prank(charlie);
+        workshop.castPublicVote(electionId, 1);
+        
+        // Check total votes
+        assertEq(workshop.getVoteCount(electionId), 3);
+        
+        // Check vote counts per choice
+        assertEq(workshop.getChoiceVoteCount(electionId, 1), 2); // Alice and Charlie
+        assertEq(workshop.getChoiceVoteCount(electionId, 2), 1); // Bob
+        assertEq(workshop.getChoiceVoteCount(electionId, 3), 0); // No votes
+    }
+
+    function test_PublicVoteTallyUpdatesInRealTime() public {
+        // Register users
+        vm.prank(alice);
+        workshop.register();
+        vm.prank(bob);
+        workshop.register();
+        vm.prank(charlie);
+        workshop.register();
+        
+        uint256 electionId = workshop.openElection(0, true);
+        
+        // Initial counts should be 0
+        assertEq(workshop.getChoiceVoteCount(electionId, 1), 0);
+        
+        // First vote
+        vm.prank(alice);
+        workshop.castPublicVote(electionId, 1);
+        assertEq(workshop.getChoiceVoteCount(electionId, 1), 1);
+        
+        // Second vote
+        vm.prank(bob);
+        workshop.castPublicVote(electionId, 1);
+        assertEq(workshop.getChoiceVoteCount(electionId, 1), 2);
+        
+        // Third vote for different choice
+        vm.prank(charlie);
+        workshop.castPublicVote(electionId, 2);
+        assertEq(workshop.getChoiceVoteCount(electionId, 1), 2);
+        assertEq(workshop.getChoiceVoteCount(electionId, 2), 1);
+    }
+
+    function test_GetElectionResults() public {
+        // Register users
+        vm.prank(alice);
+        workshop.register();
+        vm.prank(bob);
+        workshop.register();
+        vm.prank(charlie);
+        workshop.register();
+        
+        uint256 electionId = workshop.openElection(0, true);
+        
+        // Cast votes
+        vm.prank(alice);
+        workshop.castPublicVote(electionId, 1);
+        vm.prank(bob);
+        workshop.castPublicVote(electionId, 2);
+        vm.prank(charlie);
+        workshop.castPublicVote(electionId, 1);
+        
+        // Get results for choices 1 through 4
+        uint256[] memory results = workshop.getElectionResults(electionId, 4);
+        
+        assertEq(results[0], 2); // Choice 1: 2 votes
+        assertEq(results[1], 1); // Choice 2: 1 vote
+        assertEq(results[2], 0); // Choice 3: 0 votes
+        assertEq(results[3], 0); // Choice 4: 0 votes
+    }
+
+    function test_GetAllPublicVotes() public {
+        // Register users
+        vm.prank(alice);
+        workshop.register();
+        vm.prank(bob);
+        workshop.register();
+        
+        uint256 electionId = workshop.openElection(0, true);
+        
+        // Cast votes
+        vm.prank(alice);
+        workshop.castPublicVote(electionId, 3);
+        vm.prank(bob);
+        workshop.castPublicVote(electionId, 1);
+        
+        (uint256[] memory userIds, uint256[] memory choices) = workshop.getAllPublicVotes(electionId);
+        
+        assertEq(userIds.length, 2);
+        assertEq(choices.length, 2);
+        
+        assertEq(userIds[0], 1); // Alice
+        assertEq(userIds[1], 2); // Bob
+        
+        assertEq(choices[0], 3); // Alice voted for 3
+        assertEq(choices[1], 1); // Bob voted for 1
+    }
+
+    function test_RevertWhen_PublicVotingInNonExistentElection() public {
+        vm.prank(alice);
+        workshop.register();
+        
+        vm.prank(alice);
+        vm.expectRevert("Election does not exist");
+        workshop.castPublicVote(999, 1);
+    }
+
+    function test_RevertWhen_PublicVotingInClosedElection() public {
+        vm.prank(alice);
+        workshop.register();
+        
+        uint256 electionId = workshop.openElection(0, true);
+        workshop.closeElection(electionId);
+        
+        vm.prank(alice);
+        vm.expectRevert("Election is not open");
+        workshop.castPublicVote(electionId, 1);
+    }
+
+    function test_RevertWhen_PublicVotingInPrivateElection() public {
+        vm.prank(alice);
+        workshop.register();
+        
+        uint256 electionId = workshop.openElection(0, false); // Private election
+        
+        vm.prank(alice);
+        vm.expectRevert("Election is not public");
+        workshop.castPublicVote(electionId, 1);
+    }
+
+    function test_RevertWhen_UnregisteredUserVotesPublic() public {
+        uint256 electionId = workshop.openElection(0, true);
+        
+        vm.prank(alice); // Alice is not registered
+        vm.expectRevert("Voter is not registered");
+        workshop.castPublicVote(electionId, 1);
+    }
+
+    function test_RevertWhen_PublicVotingTwice() public {
+        vm.prank(alice);
+        workshop.register();
+        
+        uint256 electionId = workshop.openElection(0, true);
+        
+        // First vote succeeds
+        vm.prank(alice);
+        workshop.castPublicVote(electionId, 1);
+        
+        // Second vote fails
+        vm.prank(alice);
+        vm.expectRevert("Already voted in this election");
+        workshop.castPublicVote(electionId, 2);
+    }
+
+    function test_RevertWhen_PublicVoteChoiceIsZero() public {
+        vm.prank(alice);
+        workshop.register();
+        
+        uint256 electionId = workshop.openElection(0, true);
+        
+        vm.prank(alice);
+        vm.expectRevert("Choice must be greater than 0");
+        workshop.castPublicVote(electionId, 0);
+    }
+
+    function test_PublicVoteCastEvent() public {
+        vm.prank(alice);
+        workshop.register();
+        
+        uint256 electionId = workshop.openElection(0, true);
+        
+        vm.expectEmit(true, true, false, true);
+        emit VotingWorkshop.PublicVoteCast(electionId, 1, 2, block.timestamp);
+        
+        vm.prank(alice);
+        workshop.castPublicVote(electionId, 2);
+    }
+
+    function test_PublicVoteWithHighChoiceNumbers() public {
+        vm.prank(alice);
+        workshop.register();
+        
+        uint256 electionId = workshop.openElection(0, true);
+        
+        // Vote for choice 100
+        vm.prank(alice);
+        workshop.castPublicVote(electionId, 100);
+        
+        assertEq(workshop.getPublicVote(electionId, 1), 100);
+        assertEq(workshop.getChoiceVoteCount(electionId, 100), 1);
+    }
+
+    function test_RevertWhen_GetPublicVote_NotVoted() public {
+        vm.prank(alice);
+        workshop.register();
+        
+        uint256 electionId = workshop.openElection(0, true);
+        
+        // User hasn't voted, should revert
+        vm.expectRevert("User has not voted in this election");
+        workshop.getPublicVote(electionId, 1);
+    }
+
+    function test_MixedElections_PrivateAndPublic() public {
+        // Register users
+        vm.prank(alice);
+        workshop.register();
+        vm.prank(bob);
+        workshop.register();
+        
+        // Open private and public elections
+        uint256 privateElection = workshop.openElection(0, false);
+        uint256 publicElection = workshop.openElection(0, true);
+        
+        // Alice votes in private election
+        vm.prank(alice);
+        workshop.castPrivateVote(privateElection, hex"abc123");
+        
+        // Bob votes in public election
+        vm.prank(bob);
+        workshop.castPublicVote(publicElection, 3);
+        
+        // Verify both elections have separate vote counts
+        assertEq(workshop.getVoteCount(privateElection), 1);
+        assertEq(workshop.getVoteCount(publicElection), 1);
+        
+        // Verify votes are in correct elections
+        assertTrue(workshop.hasUserVoted(privateElection, alice));
+        assertFalse(workshop.hasUserVoted(publicElection, alice));
+        
+        assertFalse(workshop.hasUserVoted(privateElection, bob));
+        assertTrue(workshop.hasUserVoted(publicElection, bob));
     }
 }
 

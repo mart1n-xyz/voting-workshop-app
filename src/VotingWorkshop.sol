@@ -41,7 +41,7 @@ contract VotingWorkshop is Ownable {
     // Mapping from address to user ID
     mapping(address => uint256) public addressToId;
     
-    // Voting data structures
+    // Private voting data structures
     // Mapping from election ID => user ID => encrypted signature
     mapping(uint256 => mapping(uint256 => bytes)) private privateVotes;
     
@@ -51,12 +51,19 @@ contract VotingWorkshop is Ownable {
     // Mapping from election ID => array of user IDs who voted (for enumeration)
     mapping(uint256 => uint256[]) private votersInElection;
     
+    // Public voting data structures
+    // Mapping from election ID => user ID => choice (1, 2, 3, 4...)
+    mapping(uint256 => mapping(uint256 => uint256)) public publicVotes;
+    
+    // Mapping from election ID => choice => vote count
+    mapping(uint256 => mapping(uint256 => uint256)) public voteCountPerChoice;
+    
     // Events
     event UserRegistered(address indexed user, uint256 indexed userId);
-    event UserExited(address indexed user, uint256 indexed userId);
     event ElectionOpened(uint256 indexed electionId, bool isPublic, uint256 timestamp);
     event ElectionClosed(uint256 indexed electionId, uint256 timestamp);
     event PrivateVoteCast(uint256 indexed electionId, uint256 indexed userId, uint256 timestamp);
+    event PublicVoteCast(uint256 indexed electionId, uint256 indexed userId, uint256 choice, uint256 timestamp);
     
     constructor() Ownable(msg.sender) {}
     
@@ -79,21 +86,6 @@ contract VotingWorkshop is Ownable {
         nextUserId++;
         
         emit UserRegistered(msg.sender, userId);
-    }
-    
-    /**
-     * @dev Exit the registry and cancel registration
-     * Allows the user to register again later
-     */
-    function exitRegistry() external {
-        uint256 userId = addressToId[msg.sender];
-        require(userId != 0, "Not registered");
-        
-        // Clear both mappings
-        delete idToAddress[userId];
-        delete addressToId[msg.sender];
-        
-        emit UserExited(msg.sender, userId);
     }
     
     /**
@@ -284,6 +276,114 @@ contract VotingWorkshop is Ownable {
         }
         
         return (userIds, signatures);
+    }
+    
+    // ====== PUBLIC VOTING FUNCTIONS ======
+    
+    /**
+     * @dev Cast a public vote in an election
+     * @param electionId The ID of the election to vote in
+     * @param choice The voting choice (1, 2, 3, 4...)
+     */
+    function castPublicVote(uint256 electionId, uint256 choice) external {
+        // Check election exists
+        require(elections[electionId].id != 0, "Election does not exist");
+        
+        // Check election is open
+        require(elections[electionId].status == ElectionStatus.Open, "Election is not open");
+        
+        // Check election is public
+        require(elections[electionId].isPublic, "Election is not public");
+        
+        // Check voter is registered
+        uint256 userId = addressToId[msg.sender];
+        require(userId != 0, "Voter is not registered");
+        
+        // Check voter hasn't voted yet
+        require(!hasVoted[electionId][userId], "Already voted in this election");
+        
+        // Check choice is valid (must be > 0)
+        require(choice > 0, "Choice must be greater than 0");
+        
+        // Store the vote
+        publicVotes[electionId][userId] = choice;
+        hasVoted[electionId][userId] = true;
+        votersInElection[electionId].push(userId);
+        
+        // Increment the count for this choice
+        voteCountPerChoice[electionId][choice]++;
+        
+        emit PublicVoteCast(electionId, userId, choice, block.timestamp);
+    }
+    
+    /**
+     * @dev Get the vote count for a specific choice in an election
+     * @param electionId The ID of the election
+     * @param choice The choice to get the count for
+     * @return The number of votes for this choice
+     */
+    function getChoiceVoteCount(uint256 electionId, uint256 choice) external view returns (uint256) {
+        require(elections[electionId].id != 0, "Election does not exist");
+        return voteCountPerChoice[electionId][choice];
+    }
+    
+    /**
+     * @dev Get vote counts for all choices in an election (1 through numChoices)
+     * @param electionId The ID of the election
+     * @param numChoices The number of choices (returns counts for choices 1, 2, 3, ..., numChoices)
+     * @return counts Array of vote counts for each choice
+     */
+    function getElectionResults(uint256 electionId, uint256 numChoices) external view returns (uint256[] memory counts) {
+        require(elections[electionId].id != 0, "Election does not exist");
+        require(numChoices > 0, "Number of choices must be greater than 0");
+        
+        counts = new uint256[](numChoices);
+        for (uint256 i = 0; i < numChoices; i++) {
+            counts[i] = voteCountPerChoice[electionId][i + 1]; // Choices are 1-indexed
+        }
+        
+        return counts;
+    }
+    
+    /**
+     * @dev Get a specific user's public vote in an election
+     * @param electionId The ID of the election
+     * @param userId The ID of the user
+     * @return The choice the user voted for
+     */
+    function getPublicVote(uint256 electionId, uint256 userId) external view returns (uint256) {
+        require(elections[electionId].id != 0, "Election does not exist");
+        require(hasVoted[electionId][userId], "User has not voted in this election");
+        return publicVotes[electionId][userId];
+    }
+    
+    /**
+     * @dev Get all public votes for an election
+     * @param electionId The ID of the election
+     * @return userIds Array of user IDs who voted
+     * @return choices Array of corresponding vote choices
+     */
+    function getAllPublicVotes(uint256 electionId) external view returns (
+        uint256[] memory userIds,
+        uint256[] memory choices
+    ) {
+        require(elections[electionId].id != 0, "Election does not exist");
+        
+        uint256[] memory voters = votersInElection[electionId];
+        uint256 total = voters.length;
+        
+        // Initialize return arrays
+        userIds = new uint256[](total);
+        choices = new uint256[](total);
+        
+        // Fill arrays with vote data
+        for (uint256 i = 0; i < total; i++) {
+            uint256 userId = voters[i];
+            userIds[i] = userId;
+            choices[i] = publicVotes[electionId][userId];
+        }
+        
+        return (userIds, choices);
     }
     
     /**
