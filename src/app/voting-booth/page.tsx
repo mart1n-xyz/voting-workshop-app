@@ -78,6 +78,9 @@ export default function VotingBooth() {
   const [userAddress, setUserAddress] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [task1Complete, setTask1Complete] = useState(false);
+  const [task1Collapsed, setTask1Collapsed] = useState(false);
+  const [vote0Collapsed, setVote0Collapsed] = useState(false);
+  const [vote1aCollapsed, setVote1aCollapsed] = useState(false);
   
   // Vote 0 state
   const [selectedOption0, setSelectedOption0] = useState<number | null>(null);
@@ -104,7 +107,7 @@ export default function VotingBooth() {
   const vote1aConfig = getVoteConfig("vote1a");
 
   // Function to fetch election results for Vote 0
-  const fetchElectionResults0 = async () => {
+  const fetchElectionResults0 = async (autoCollapseOnLoad = false) => {
     if (!vote0Config) return;
     
     try {
@@ -121,7 +124,13 @@ export default function VotingBooth() {
         args: [BigInt(vote0Config.electionId)],
       });
 
-      setElectionStatus0(election.status === 1 ? "Open" : "Closed");
+      const status = election.status === 1 ? "Open" : "Closed";
+      setElectionStatus0(status);
+      
+      // Auto-collapse if closed or on initial load
+      if (autoCollapseOnLoad && status !== "Open") {
+        setVote0Collapsed(true);
+      }
 
       // Get vote counts for all options
       const counts = await publicClient.readContract({
@@ -136,11 +145,15 @@ export default function VotingBooth() {
       setTotalVotes0(countsArray.reduce((sum, count) => sum + count, 0));
     } catch (error) {
       console.error("Error fetching results for vote 0:", error);
+      // If election doesn't exist yet, auto-collapse on load
+      if (autoCollapseOnLoad) {
+        setVote0Collapsed(true);
+      }
     }
   };
 
   // Function to fetch election results for Vote 1a
-  const fetchElectionResults1a = async () => {
+  const fetchElectionResults1a = async (autoCollapseOnLoad = false) => {
     if (!vote1aConfig) return;
     
     try {
@@ -157,7 +170,13 @@ export default function VotingBooth() {
         args: [BigInt(vote1aConfig.electionId)],
       });
 
-      setElectionStatus1a(election.status === 1 ? "Open" : "Closed");
+      const status = election.status === 1 ? "Open" : "Closed";
+      setElectionStatus1a(status);
+      
+      // Auto-collapse if closed or on initial load
+      if (autoCollapseOnLoad && status !== "Open") {
+        setVote1aCollapsed(true);
+      }
 
       // Get vote counts for all options
       const counts = await publicClient.readContract({
@@ -172,6 +191,10 @@ export default function VotingBooth() {
       setTotalVotes1a(countsArray.reduce((sum, count) => sum + count, 0));
     } catch (error) {
       console.error("Error fetching results for vote 1a:", error);
+      // If election doesn't exist yet, auto-collapse on load
+      if (autoCollapseOnLoad) {
+        setVote1aCollapsed(true);
+      }
     }
   };
 
@@ -212,6 +235,10 @@ export default function VotingBooth() {
           const district = getAssignedDistrict(walletAddress);
           setAssignedDistrict(district);
           
+          // Mark Task 1 as complete (assume user has seen their ID after registration)
+          setTask1Complete(true);
+          setTask1Collapsed(true);
+          
           const publicVotesABI = [
             {
               inputs: [
@@ -248,8 +275,8 @@ export default function VotingBooth() {
               setUserVote0(Number(choice));
             }
             
-            // Fetch initial results for vote 0
-            await fetchElectionResults0();
+            // Fetch initial results for vote 0 (with auto-collapse on load)
+            await fetchElectionResults0(true);
           }
           
           // Check if user has voted in vote 1a
@@ -275,8 +302,8 @@ export default function VotingBooth() {
               setUserVote1a(Number(choice));
             }
             
-            // Fetch initial results for vote 1a
-            await fetchElectionResults1a();
+            // Fetch initial results for vote 1a (with auto-collapse on load)
+            await fetchElectionResults1a(true);
           }
           
           setLoading(false);
@@ -291,9 +318,9 @@ export default function VotingBooth() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, authenticated, user, router, vote0Config, vote1aConfig]);
 
-  // Auto-refresh results for Vote 0 every 5 seconds
+  // Auto-refresh results for Vote 0 every 5 seconds (only when Open)
   useEffect(() => {
-    if (!vote0Config || !task1Complete) return;
+    if (!vote0Config || !task1Complete || electionStatus0 !== "Open") return;
 
     const intervalId = setInterval(() => {
       fetchElectionResults0();
@@ -301,11 +328,11 @@ export default function VotingBooth() {
 
     return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vote0Config, task1Complete]);
+  }, [vote0Config, task1Complete, electionStatus0]);
 
-  // Auto-refresh results for Vote 1a every 5 seconds
+  // Auto-refresh results for Vote 1a every 5 seconds (only when Open)
   useEffect(() => {
-    if (!vote1aConfig || !task1Complete || !hasVoted0) return;
+    if (!vote1aConfig || !task1Complete || !hasVoted0 || electionStatus1a !== "Open") return;
 
     const intervalId = setInterval(() => {
       fetchElectionResults1a();
@@ -313,7 +340,7 @@ export default function VotingBooth() {
 
     return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vote1aConfig, task1Complete, hasVoted0]);
+  }, [vote1aConfig, task1Complete, hasVoted0, electionStatus1a]);
 
   const handleRefreshResults0 = async () => {
     setIsRefreshingResults0(true);
@@ -449,17 +476,15 @@ export default function VotingBooth() {
                   <p className="text-sm text-green-600 font-medium">Completed</p>
                 )}
               </div>
-              {task1Complete && (
-                <button
-                  onClick={() => setTask1Complete(false)}
-                  className="text-sm text-gray-500 hover:text-gray-700 underline"
-                >
-                  Expand
-                </button>
-              )}
+              <button
+                onClick={() => setTask1Collapsed(!task1Collapsed)}
+                className="text-sm text-gray-500 hover:text-gray-700 underline"
+              >
+                {task1Collapsed ? "Expand" : "Collapse"}
+              </button>
             </div>
 
-            {!task1Complete && (
+            {!task1Collapsed && (
               <div className="p-8 space-y-6">
                 <div className="text-center space-y-4">
                   <p className="text-2xl font-bold text-gray-900">
@@ -490,13 +515,6 @@ export default function VotingBooth() {
                     </li>
                   </ul>
                 </div>
-
-                <button
-                  onClick={() => setTask1Complete(true)}
-                  className="w-full bg-gray-900 text-white px-8 py-4 rounded-xl text-lg font-semibold transition-all duration-300 hover:bg-gray-800 hover:shadow-lg"
-                >
-                  Done! ✓
-                </button>
               </div>
             )}
           </div>
@@ -520,13 +538,27 @@ export default function VotingBooth() {
                 {!task1Complete && (
                   <p className="text-sm text-gray-500">Complete previous task to unlock</p>
                 )}
-                {hasVoted0 && (
+                {hasVoted0 && electionStatus0 === "Open" && (
                   <p className="text-sm text-green-600 font-medium">Voted</p>
                 )}
+                {electionStatus0 === "Closed" && (
+                  <p className="text-sm text-blue-600 font-medium">Closed</p>
+                )}
+                {electionStatus0 === null && task1Complete && (
+                  <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
+                )}
               </div>
+              {task1Complete && (
+                <button
+                  onClick={() => setVote0Collapsed(!vote0Collapsed)}
+                  className="text-sm text-gray-500 hover:text-gray-700 underline"
+                >
+                  {vote0Collapsed ? "Expand" : "Collapse"}
+                </button>
+              )}
             </div>
 
-{task1Complete && (
+{task1Complete && !vote0Collapsed && (
               <div className="p-8 space-y-6">
                 {vote0Config.isPractice && (
                   <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
@@ -548,7 +580,19 @@ export default function VotingBooth() {
                     )}
                   </div>
 
-                  {/* Voting Section - Only shown if not voted */}
+                  {/* Waiting for Election to Open */}
+                  {electionStatus0 === null && (
+                    <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-6 text-center">
+                      <p className="text-lg font-semibold text-amber-900 mb-2">
+                        ⏳ Waiting for Vote to Open
+                      </p>
+                      <p className="text-sm text-amber-700">
+                        The organizer will open this vote when ready. Please wait.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Voting Section - Only shown if not voted and election is open */}
                   {!hasVoted0 && electionStatus0 === "Open" && (
                     <>
                       <div className="pt-2">
@@ -589,7 +633,8 @@ export default function VotingBooth() {
                     </div>
                   )}
 
-                  {/* Results Section - Always visible */}
+                  {/* Results Section - Only visible when election has been opened */}
+                  {electionStatus0 !== null && (
                   <div className="border-t-2 border-gray-200 pt-6 mt-6">
                     <div className="flex items-center justify-between mb-4">
                       <div>
@@ -692,6 +737,7 @@ export default function VotingBooth() {
                       })}
                     </div>
                   </div>
+                  )}
                 </div>
               </div>
             )}
@@ -717,13 +763,27 @@ export default function VotingBooth() {
                   {!hasVoted0 && (
                     <p className="text-sm text-gray-500">Complete previous task to unlock</p>
                   )}
-                  {hasVoted1a && (
+                  {hasVoted1a && electionStatus1a === "Open" && (
                     <p className="text-sm text-green-600 font-medium">Voted</p>
                   )}
+                  {electionStatus1a === "Closed" && (
+                    <p className="text-sm text-blue-600 font-medium">Closed</p>
+                  )}
+                  {electionStatus1a === null && hasVoted0 && (
+                    <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
+                  )}
                 </div>
+                {hasVoted0 && (
+                  <button
+                    onClick={() => setVote1aCollapsed(!vote1aCollapsed)}
+                    className="text-sm text-gray-500 hover:text-gray-700 underline"
+                  >
+                    {vote1aCollapsed ? "Expand" : "Collapse"}
+                  </button>
+                )}
               </div>
 
-              {hasVoted0 && (
+              {hasVoted0 && !vote1aCollapsed && (
                 <div className="p-8 space-y-6">
                   {/* District Assignment Banner */}
                   {assignedDistrict && (
@@ -746,6 +806,18 @@ export default function VotingBooth() {
                         {vote1aConfig.question}
                       </p>
                     </div>
+
+                    {/* Waiting for Election to Open */}
+                    {electionStatus1a === null && (
+                      <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-6 text-center">
+                        <p className="text-lg font-semibold text-amber-900 mb-2">
+                          ⏳ Waiting for Vote to Open
+                        </p>
+                        <p className="text-sm text-amber-700">
+                          The organizer will open this vote when ready. Please wait.
+                        </p>
+                      </div>
+                    )}
 
                     {/* Voting Section */}
                     {!hasVoted1a && electionStatus1a === "Open" && (
@@ -798,7 +870,8 @@ export default function VotingBooth() {
                       </div>
                     )}
 
-                    {/* Results Section with 60% Threshold */}
+                    {/* Results Section with 60% Threshold - Only visible when election has been opened */}
+                    {electionStatus1a !== null && (
                     <div className="border-t-2 border-gray-200 pt-6 mt-6">
                       <div className="flex items-center justify-between mb-4">
                         <div>
@@ -935,6 +1008,7 @@ export default function VotingBooth() {
                         })}
                       </div>
                     </div>
+                    )}
                   </div>
                 </div>
               )}
