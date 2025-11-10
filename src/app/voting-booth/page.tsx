@@ -68,6 +68,16 @@ const VOTING_WORKSHOP_ABI = [
     stateMutability: "view",
     type: "function",
   },
+  {
+    inputs: [{ internalType: "uint256", name: "electionId", type: "uint256" }],
+    name: "getAllPublicVotes",
+    outputs: [
+      { internalType: "uint256[]", name: "userIds", type: "uint256[]" },
+      { internalType: "uint256[]", name: "choices", type: "uint256[]" }
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
 ] as const;
 
 export default function VotingBooth() {
@@ -91,6 +101,7 @@ export default function VotingBooth() {
   const [totalVotes0, setTotalVotes0] = useState(0);
   const [electionStatus0, setElectionStatus0] = useState<"Open" | "Closed" | null>(null);
   const [isRefreshingResults0, setIsRefreshingResults0] = useState(false);
+  const [votersByChoice0, setVotersByChoice0] = useState<Record<number, number[]>>({});
   
   // Vote 1a state
   const [selectedOption1a, setSelectedOption1a] = useState<number | null>(null);
@@ -102,6 +113,7 @@ export default function VotingBooth() {
   const [electionStatus1a, setElectionStatus1a] = useState<"Open" | "Closed" | null>(null);
   const [isRefreshingResults1a, setIsRefreshingResults1a] = useState(false);
   const [assignedDistrict, setAssignedDistrict] = useState<string | null>(null);
+  const [votersByChoice1a, setVotersByChoice1a] = useState<Record<number, number[]>>({});
   
   const vote0Config = getVoteConfig("vote0");
   const vote1aConfig = getVoteConfig("vote1a");
@@ -143,6 +155,29 @@ export default function VotingBooth() {
       const countsArray = counts.map(c => Number(c));
       setVoteCounts0(countsArray);
       setTotalVotes0(countsArray.reduce((sum, count) => sum + count, 0));
+
+      // Get all votes to show voter IDs per choice
+      const allVotes = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getAllPublicVotes",
+        args: [BigInt(vote0Config.electionId)],
+      });
+
+      // Destructure the tuple result
+      const [userIds, choices] = allVotes;
+
+      // Group voters by their choice
+      const votersByChoice: Record<number, number[]> = {};
+      userIds.forEach((userId: bigint, index: number) => {
+        const choice = Number(choices[index]);
+        if (!votersByChoice[choice]) {
+          votersByChoice[choice] = [];
+        }
+        votersByChoice[choice].push(Number(userId));
+      });
+
+      setVotersByChoice0(votersByChoice);
     } catch (error) {
       console.error("Error fetching results for vote 0:", error);
       // If election doesn't exist yet, auto-collapse on load
@@ -189,6 +224,29 @@ export default function VotingBooth() {
       const countsArray = counts.map(c => Number(c));
       setVoteCounts1a(countsArray);
       setTotalVotes1a(countsArray.reduce((sum, count) => sum + count, 0));
+
+      // Get all votes to show voter IDs per choice
+      const allVotes = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getAllPublicVotes",
+        args: [BigInt(vote1aConfig.electionId)],
+      });
+
+      // Destructure the tuple result
+      const [userIds, choices] = allVotes;
+
+      // Group voters by their choice
+      const votersByChoice: Record<number, number[]> = {};
+      userIds.forEach((userId: bigint, index: number) => {
+        const choice = Number(choices[index]);
+        if (!votersByChoice[choice]) {
+          votersByChoice[choice] = [];
+        }
+        votersByChoice[choice].push(Number(userId));
+      });
+
+      setVotersByChoice1a(votersByChoice);
     } catch (error) {
       console.error("Error fetching results for vote 1a:", error);
       // If election doesn't exist yet, auto-collapse on load
@@ -678,11 +736,12 @@ export default function VotingBooth() {
                         const percentage = totalVotes0 > 0 ? (voteCount / totalVotes0) * 100 : 0;
                         const isWinner = electionStatus0 === "Closed" && voteCount > 0 && voteCount === Math.max(...voteCounts0);
                         const isUserChoice = hasVoted0 && option.id === userVote0;
+                        const voters = votersByChoice0[option.id] || [];
 
                         return (
                           <div
                             key={option.id}
-                            className={`relative overflow-hidden rounded-xl border-2 transition-all ${
+                            className={`rounded-xl border-2 transition-all overflow-hidden ${
                               isWinner
                                 ? "border-green-400 bg-green-50"
                                 : isUserChoice
@@ -690,48 +749,77 @@ export default function VotingBooth() {
                                 : "border-gray-200 bg-white"
                             }`}
                           >
-                            {/* Progress bar background */}
-                            <div 
-                              className={`absolute inset-0 transition-all duration-500 ${
-                                isWinner
-                                  ? "bg-green-100"
-                                  : isUserChoice
-                                  ? "bg-blue-100"
-                                  : "bg-gray-100"
-                              }`}
-                              style={{ width: `${percentage}%` }}
-                            />
-                            
-                            {/* Content */}
-                            <div className="relative px-4 py-3 flex items-center justify-between">
-                              <div className="flex-1 pr-4">
-                                <div className="flex items-center gap-2">
-                                  {isWinner && (
-                                    <span className="text-lg">🏆</span>
-                                  )}
-                                  {isUserChoice && !isWinner && (
-                                    <span className="text-blue-600 font-bold">→</span>
-                                  )}
-                                  <p className={`font-medium ${
-                                    isWinner ? "text-green-900 font-bold" : "text-gray-900"
-                                  }`}>
-                                    {option.text}
-                                  </p>
+                            <div className="relative overflow-hidden">
+                              {/* Progress bar background */}
+                              <div 
+                                className={`absolute inset-0 transition-all duration-500 ${
+                                  isWinner
+                                    ? "bg-green-100"
+                                    : isUserChoice
+                                    ? "bg-blue-100"
+                                    : "bg-gray-100"
+                                }`}
+                                style={{ width: `${percentage}%` }}
+                              />
+                              
+                              {/* Content */}
+                              <div className="relative px-4 py-3 flex items-center justify-between">
+                                <div className="flex-1 pr-4">
+                                  <div className="flex items-center gap-2">
+                                    {isWinner && (
+                                      <span className="text-lg">🏆</span>
+                                    )}
+                                    {isUserChoice && !isWinner && (
+                                      <span className="text-blue-600 font-bold">→</span>
+                                    )}
+                                    <p className={`font-medium ${
+                                      isWinner ? "text-green-900 font-bold" : "text-gray-900"
+                                    }`}>
+                                      {option.text}
+                                    </p>
+                                  </div>
                                 </div>
-                              </div>
-                              <div className="flex items-center gap-3">
-                                <div className="text-right">
-                                  <p className={`text-2xl font-bold ${
-                                    isWinner ? "text-green-700" : "text-gray-900"
-                                  }`}>
-                                    {percentage.toFixed(1)}%
-                                  </p>
-                                  <p className="text-xs text-gray-600">
-                                    {voteCount} {voteCount === 1 ? "vote" : "votes"}
-                                  </p>
+                                <div className="flex items-center gap-3">
+                                  <div className="text-right">
+                                    <p className={`text-2xl font-bold ${
+                                      isWinner ? "text-green-700" : "text-gray-900"
+                                    }`}>
+                                      {percentage.toFixed(1)}%
+                                    </p>
+                                    <p className="text-xs text-gray-600">
+                                      {voteCount} {voteCount === 1 ? "vote" : "votes"}
+                                    </p>
+                                  </div>
                                 </div>
                               </div>
                             </div>
+                            
+                            {/* Voter IDs List */}
+                            {voters.length > 0 && (
+                              <div className={`px-4 py-2 border-t ${
+                                isWinner
+                                  ? "border-green-200 bg-green-50"
+                                  : isUserChoice
+                                  ? "border-blue-200 bg-blue-50"
+                                  : "border-gray-200 bg-gray-50"
+                              }`}>
+                                <p className="text-xs text-gray-600 mb-1">Voters:</p>
+                                <div className="flex flex-wrap gap-1">
+                                  {voters.map((voterId) => (
+                                    <span
+                                      key={voterId}
+                                      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                        voterId === Number(userId)
+                                          ? "bg-blue-200 text-blue-800"
+                                          : "bg-gray-200 text-gray-700"
+                                      }`}
+                                    >
+                                      #{voterId}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -929,11 +1017,12 @@ export default function VotingBooth() {
                           const isUserChoice = hasVoted1a && option.id === userVote1a;
                           const isHomeDistrict = assignedDistrict && option.text.includes(assignedDistrict);
                           const passedThreshold = vote1aConfig.coordinationThreshold && percentage >= (vote1aConfig.coordinationThreshold * 100);
+                          const voters = votersByChoice1a[option.id] || [];
 
                           return (
                             <div key={option.id} className="relative">
                               <div
-                                className={`relative overflow-hidden rounded-xl border-2 transition-all ${
+                                className={`rounded-xl border-2 transition-all overflow-hidden ${
                                   isWinner
                                     ? "border-green-400 bg-green-50"
                                     : passedThreshold
@@ -945,63 +1034,96 @@ export default function VotingBooth() {
                                     : "border-gray-200 bg-white"
                                 }`}
                               >
-                                {/* 60% Threshold Line */}
-                                {vote1aConfig.coordinationThreshold && (
-                                  <div 
-                                    className="absolute top-0 bottom-0 w-0.5 bg-red-400 z-10"
-                                    style={{ left: `${vote1aConfig.coordinationThreshold * 100}%` }}
-                                    title="60% threshold"
-                                  />
-                                )}
+                                <div className="relative overflow-hidden">
+                                  {/* 60% Threshold Line */}
+                                  {vote1aConfig.coordinationThreshold && (
+                                    <div 
+                                      className="absolute top-0 bottom-0 w-0.5 bg-red-400 z-10"
+                                      style={{ left: `${vote1aConfig.coordinationThreshold * 100}%` }}
+                                      title="60% threshold"
+                                    />
+                                  )}
 
-                                {/* Progress bar */}
-                                <div 
-                                  className={`absolute inset-0 transition-all duration-500 ${
-                                    isWinner
-                                      ? "bg-green-100"
-                                      : passedThreshold
-                                      ? "bg-amber-100"
-                                      : isUserChoice
-                                      ? "bg-blue-100"
-                                      : isHomeDistrict
-                                      ? "bg-purple-100"
-                                      : "bg-gray-100"
-                                  }`}
-                                  style={{ width: `${percentage}%` }}
-                                />
-                                
-                                {/* Content */}
-                                <div className="relative px-4 py-3 flex items-center justify-between">
-                                  <div className="flex-1 pr-4">
-                                    <div className="flex items-center gap-2">
-                                      {isWinner && <span className="text-lg">🏆</span>}
-                                      {passedThreshold && !isWinner && <span className="text-lg">🎓</span>}
-                                      {isUserChoice && !isWinner && !passedThreshold && (
-                                        <span className="text-blue-600 font-bold">→</span>
-                                      )}
-                                      {isHomeDistrict && !isUserChoice && !passedThreshold && (
-                                        <span className="text-sm">🏠</span>
-                                      )}
-                                      <p className={`font-medium ${
-                                        isWinner || passedThreshold ? "font-bold" : ""
-                                      }`}>
-                                        {option.text}
-                                      </p>
+                                  {/* Progress bar */}
+                                  <div 
+                                    className={`absolute inset-0 transition-all duration-500 ${
+                                      isWinner
+                                        ? "bg-green-100"
+                                        : passedThreshold
+                                        ? "bg-amber-100"
+                                        : isUserChoice
+                                        ? "bg-blue-100"
+                                        : isHomeDistrict
+                                        ? "bg-purple-100"
+                                        : "bg-gray-100"
+                                    }`}
+                                    style={{ width: `${percentage}%` }}
+                                  />
+                                  
+                                  {/* Content */}
+                                  <div className="relative px-4 py-3 flex items-center justify-between">
+                                    <div className="flex-1 pr-4">
+                                      <div className="flex items-center gap-2">
+                                        {isWinner && <span className="text-lg">🏆</span>}
+                                        {passedThreshold && !isWinner && <span className="text-lg">🎓</span>}
+                                        {isUserChoice && !isWinner && !passedThreshold && (
+                                          <span className="text-blue-600 font-bold">→</span>
+                                        )}
+                                        {isHomeDistrict && !isUserChoice && !passedThreshold && (
+                                          <span className="text-sm">🏠</span>
+                                        )}
+                                        <p className={`font-medium ${
+                                          isWinner || passedThreshold ? "font-bold" : ""
+                                        }`}>
+                                          {option.text}
+                                        </p>
+                                      </div>
                                     </div>
-                                  </div>
-                                  <div className="flex items-center gap-3">
-                                    <div className="text-right">
-                                      <p className={`text-2xl font-bold ${
-                                        isWinner ? "text-green-700" : passedThreshold ? "text-amber-700" : "text-gray-900"
-                                      }`}>
-                                        {percentage.toFixed(1)}%
-                                      </p>
-                                      <p className="text-xs text-gray-600">
-                                        {voteCount} {voteCount === 1 ? "vote" : "votes"}
-                                      </p>
+                                    <div className="flex items-center gap-3">
+                                      <div className="text-right">
+                                        <p className={`text-2xl font-bold ${
+                                          isWinner ? "text-green-700" : passedThreshold ? "text-amber-700" : "text-gray-900"
+                                        }`}>
+                                          {percentage.toFixed(1)}%
+                                        </p>
+                                        <p className="text-xs text-gray-600">
+                                          {voteCount} {voteCount === 1 ? "vote" : "votes"}
+                                        </p>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
+                                
+                                {/* Voter IDs List */}
+                                {voters.length > 0 && (
+                                  <div className={`px-4 py-2 border-t ${
+                                    isWinner
+                                      ? "border-green-200 bg-green-50"
+                                      : passedThreshold
+                                      ? "border-amber-200 bg-amber-50"
+                                      : isUserChoice
+                                      ? "border-blue-200 bg-blue-50"
+                                      : isHomeDistrict
+                                      ? "border-purple-200 bg-purple-50"
+                                      : "border-gray-200 bg-gray-50"
+                                  }`}>
+                                    <p className="text-xs text-gray-600 mb-1">Voters:</p>
+                                    <div className="flex flex-wrap gap-1">
+                                      {voters.map((voterId) => (
+                                        <span
+                                          key={voterId}
+                                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                            voterId === Number(userId)
+                                              ? "bg-blue-200 text-blue-800"
+                                              : "bg-gray-200 text-gray-700"
+                                          }`}
+                                        >
+                                          #{voterId}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );
