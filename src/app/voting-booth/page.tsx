@@ -10,7 +10,7 @@ import { statusNetworkSepolia } from "viem/chains";
 import { CheckCircleIcon } from "@heroicons/react/24/solid";
 import { ToastContainer } from "react-toastify";
 import { showSuccessToast, showErrorToast } from "@/components/ui/custom-toast";
-import { getVoteConfig, VOTING_CONTRACT_ADDRESS } from "@/config/votesConfig";
+import { getVoteConfig, VOTING_CONTRACT_ADDRESS, getAssignedDistrict } from "@/config/votesConfig";
 
 const VOTING_WORKSHOP_ABI = [
   {
@@ -40,6 +40,34 @@ const VOTING_WORKSHOP_ABI = [
     stateMutability: "view",
     type: "function",
   },
+  {
+    inputs: [
+      { internalType: "uint256", name: "electionId", type: "uint256" },
+      { internalType: "uint256", name: "numChoices", type: "uint256" }
+    ],
+    name: "getElectionResults",
+    outputs: [{ internalType: "uint256[]", name: "counts", type: "uint256[]" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "electionId", type: "uint256" }],
+    name: "getElection",
+    outputs: [{
+      components: [
+        { internalType: "uint256", name: "id", type: "uint256" },
+        { internalType: "uint8", name: "status", type: "uint8" },
+        { internalType: "bool", name: "isPublic", type: "bool" },
+        { internalType: "uint256", name: "openedAt", type: "uint256" },
+        { internalType: "uint256", name: "closedAt", type: "uint256" }
+      ],
+      internalType: "struct VotingWorkshop.Election",
+      name: "",
+      type: "tuple"
+    }],
+    stateMutability: "view",
+    type: "function",
+  },
 ] as const;
 
 export default function VotingBooth() {
@@ -47,16 +75,105 @@ export default function VotingBooth() {
   const { sendTransaction } = useSendTransaction();
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
+  const [userAddress, setUserAddress] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [task1Complete, setTask1Complete] = useState(false);
   
   // Vote 0 state
-  const [selectedOption, setSelectedOption] = useState<number | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [hasVoted, setHasVoted] = useState(false);
-  const [userVote, setUserVote] = useState<number | null>(null);
+  const [selectedOption0, setSelectedOption0] = useState<number | null>(null);
+  const [isSubmitting0, setIsSubmitting0] = useState(false);
+  const [hasVoted0, setHasVoted0] = useState(false);
+  const [userVote0, setUserVote0] = useState<number | null>(null);
+  const [voteCounts0, setVoteCounts0] = useState<number[]>([]);
+  const [totalVotes0, setTotalVotes0] = useState(0);
+  const [electionStatus0, setElectionStatus0] = useState<"Open" | "Closed" | null>(null);
+  const [isRefreshingResults0, setIsRefreshingResults0] = useState(false);
+  
+  // Vote 1a state
+  const [selectedOption1a, setSelectedOption1a] = useState<number | null>(null);
+  const [isSubmitting1a, setIsSubmitting1a] = useState(false);
+  const [hasVoted1a, setHasVoted1a] = useState(false);
+  const [userVote1a, setUserVote1a] = useState<number | null>(null);
+  const [voteCounts1a, setVoteCounts1a] = useState<number[]>([]);
+  const [totalVotes1a, setTotalVotes1a] = useState(0);
+  const [electionStatus1a, setElectionStatus1a] = useState<"Open" | "Closed" | null>(null);
+  const [isRefreshingResults1a, setIsRefreshingResults1a] = useState(false);
+  const [assignedDistrict, setAssignedDistrict] = useState<string | null>(null);
   
   const vote0Config = getVoteConfig("vote0");
+  const vote1aConfig = getVoteConfig("vote1a");
+
+  // Function to fetch election results for Vote 0
+  const fetchElectionResults0 = async () => {
+    if (!vote0Config) return;
+    
+    try {
+      const publicClient = createPublicClient({
+        chain: statusNetworkSepolia,
+        transport: http("https://public.sepolia.rpc.status.network"),
+      });
+
+      // Get election status
+      const election = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getElection",
+        args: [BigInt(vote0Config.electionId)],
+      });
+
+      setElectionStatus0(election.status === 1 ? "Open" : "Closed");
+
+      // Get vote counts for all options
+      const counts = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getElectionResults",
+        args: [BigInt(vote0Config.electionId), BigInt(vote0Config.options.length)],
+      });
+
+      const countsArray = counts.map(c => Number(c));
+      setVoteCounts0(countsArray);
+      setTotalVotes0(countsArray.reduce((sum, count) => sum + count, 0));
+    } catch (error) {
+      console.error("Error fetching results for vote 0:", error);
+    }
+  };
+
+  // Function to fetch election results for Vote 1a
+  const fetchElectionResults1a = async () => {
+    if (!vote1aConfig) return;
+    
+    try {
+      const publicClient = createPublicClient({
+        chain: statusNetworkSepolia,
+        transport: http("https://public.sepolia.rpc.status.network"),
+      });
+
+      // Get election status
+      const election = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getElection",
+        args: [BigInt(vote1aConfig.electionId)],
+      });
+
+      setElectionStatus1a(election.status === 1 ? "Open" : "Closed");
+
+      // Get vote counts for all options
+      const counts = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getElectionResults",
+        args: [BigInt(vote1aConfig.electionId), BigInt(vote1aConfig.options.length)],
+      });
+
+      const countsArray = counts.map(c => Number(c));
+      setVoteCounts1a(countsArray);
+      setTotalVotes1a(countsArray.reduce((sum, count) => sum + count, 0));
+    } catch (error) {
+      console.error("Error fetching results for vote 1a:", error);
+    }
+  };
 
   useEffect(() => {
     async function checkRegistrationAndVotes() {
@@ -89,33 +206,38 @@ export default function VotingBooth() {
           router.push("/");
         } else {
           setUserId(id.toString());
+          setUserAddress(walletAddress);
+          
+          // Assign district for vote 1a
+          const district = getAssignedDistrict(walletAddress);
+          setAssignedDistrict(district);
+          
+          const publicVotesABI = [
+            {
+              inputs: [
+                { internalType: "uint256", name: "", type: "uint256" },
+                { internalType: "uint256", name: "", type: "uint256" }
+              ],
+              name: "publicVotes",
+              outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+              stateMutability: "view",
+              type: "function",
+            },
+          ] as const;
           
           // Check if user has voted in vote 0
           if (vote0Config) {
-            const voted = await publicClient.readContract({
+            const voted0 = await publicClient.readContract({
               address: VOTING_CONTRACT_ADDRESS,
               abi: VOTING_WORKSHOP_ABI,
               functionName: "hasUserVoted",
               args: [BigInt(vote0Config.electionId), walletAddress as `0x${string}`],
             });
             
-            setHasVoted(voted);
+            setHasVoted0(voted0);
             
             // If voted, get their vote choice
-            if (voted) {
-              const publicVotesABI = [
-                {
-                  inputs: [
-                    { internalType: "uint256", name: "", type: "uint256" },
-                    { internalType: "uint256", name: "", type: "uint256" }
-                  ],
-                  name: "publicVotes",
-                  outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
-                  stateMutability: "view",
-                  type: "function",
-                },
-              ] as const;
-              
+            if (voted0) {
               const choice = await publicClient.readContract({
                 address: VOTING_CONTRACT_ADDRESS,
                 abi: publicVotesABI,
@@ -123,8 +245,38 @@ export default function VotingBooth() {
                 args: [BigInt(vote0Config.electionId), id],
               });
               
-              setUserVote(Number(choice));
+              setUserVote0(Number(choice));
             }
+            
+            // Fetch initial results for vote 0
+            await fetchElectionResults0();
+          }
+          
+          // Check if user has voted in vote 1a
+          if (vote1aConfig) {
+            const voted1a = await publicClient.readContract({
+              address: VOTING_CONTRACT_ADDRESS,
+              abi: VOTING_WORKSHOP_ABI,
+              functionName: "hasUserVoted",
+              args: [BigInt(vote1aConfig.electionId), walletAddress as `0x${string}`],
+            });
+            
+            setHasVoted1a(voted1a);
+            
+            // If voted, get their vote choice
+            if (voted1a) {
+              const choice = await publicClient.readContract({
+                address: VOTING_CONTRACT_ADDRESS,
+                abi: publicVotesABI,
+                functionName: "publicVotes",
+                args: [BigInt(vote1aConfig.electionId), id],
+              });
+              
+              setUserVote1a(Number(choice));
+            }
+            
+            // Fetch initial results for vote 1a
+            await fetchElectionResults1a();
           }
           
           setLoading(false);
@@ -136,25 +288,60 @@ export default function VotingBooth() {
     }
 
     checkRegistrationAndVotes();
-  }, [ready, authenticated, user, router, vote0Config]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, authenticated, user, router, vote0Config, vote1aConfig]);
 
-  const handleVoteSubmit = async () => {
-    if (selectedOption === null || !vote0Config) {
+  // Auto-refresh results for Vote 0 every 5 seconds
+  useEffect(() => {
+    if (!vote0Config || !task1Complete) return;
+
+    const intervalId = setInterval(() => {
+      fetchElectionResults0();
+    }, 5000);
+
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vote0Config, task1Complete]);
+
+  // Auto-refresh results for Vote 1a every 5 seconds
+  useEffect(() => {
+    if (!vote1aConfig || !task1Complete || !hasVoted0) return;
+
+    const intervalId = setInterval(() => {
+      fetchElectionResults1a();
+    }, 5000);
+
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vote1aConfig, task1Complete, hasVoted0]);
+
+  const handleRefreshResults0 = async () => {
+    setIsRefreshingResults0(true);
+    await fetchElectionResults0();
+    setTimeout(() => setIsRefreshingResults0(false), 300);
+  };
+
+  const handleRefreshResults1a = async () => {
+    setIsRefreshingResults1a(true);
+    await fetchElectionResults1a();
+    setTimeout(() => setIsRefreshingResults1a(false), 300);
+  };
+
+  const handleVoteSubmit0 = async () => {
+    if (selectedOption0 === null || !vote0Config) {
       showErrorToast("Please select an option");
       return;
     }
 
-    setIsSubmitting(true);
+    setIsSubmitting0(true);
 
     try {
-      // Encode the castPublicVote function call
       const data = encodeFunctionData({
         abi: VOTING_WORKSHOP_ABI,
         functionName: "castPublicVote",
-        args: [BigInt(vote0Config.electionId), BigInt(selectedOption)],
+        args: [BigInt(vote0Config.electionId), BigInt(selectedOption0)],
       });
 
-      // Send the transaction
       await sendTransaction({
         to: VOTING_CONTRACT_ADDRESS,
         data: data,
@@ -162,13 +349,49 @@ export default function VotingBooth() {
       });
 
       showSuccessToast("Vote submitted successfully!");
-      setHasVoted(true);
-      setUserVote(selectedOption);
+      setHasVoted0(true);
+      setUserVote0(selectedOption0);
+      
+      setTimeout(() => fetchElectionResults0(), 1500);
     } catch (error: any) {
       console.error("Vote submission error:", error);
       showErrorToast(error?.message || "Failed to submit vote. Please try again.");
     } finally {
-      setIsSubmitting(false);
+      setIsSubmitting0(false);
+    }
+  };
+
+  const handleVoteSubmit1a = async () => {
+    if (selectedOption1a === null || !vote1aConfig) {
+      showErrorToast("Please select an option");
+      return;
+    }
+
+    setIsSubmitting1a(true);
+
+    try {
+      const data = encodeFunctionData({
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "castPublicVote",
+        args: [BigInt(vote1aConfig.electionId), BigInt(selectedOption1a)],
+      });
+
+      await sendTransaction({
+        to: VOTING_CONTRACT_ADDRESS,
+        data: data,
+        value: BigInt(0),
+      });
+
+      showSuccessToast("Vote submitted successfully!");
+      setHasVoted1a(true);
+      setUserVote1a(selectedOption1a);
+      
+      setTimeout(() => fetchElectionResults1a(), 1500);
+    } catch (error: any) {
+      console.error("Vote submission error:", error);
+      showErrorToast(error?.message || "Failed to submit vote. Please try again.");
+    } finally {
+      setIsSubmitting1a(false);
     }
   };
 
@@ -181,7 +404,7 @@ export default function VotingBooth() {
     return <FullScreenLoader />;
   }
 
-  if (isSubmitting) {
+  if (isSubmitting0 || isSubmitting1a) {
     return <FullScreenLoader message="Submitting your vote..." />;
   }
 
@@ -283,7 +506,7 @@ export default function VotingBooth() {
             task1Complete ? "border-gray-200" : "border-gray-100 opacity-50"
           }`}>
             <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
-              {hasVoted ? (
+              {hasVoted0 ? (
                 <CheckCircleIcon className="w-7 h-7 text-green-600" />
               ) : (
                 <div className="w-7 h-7 rounded-full border-2 border-gray-400 flex items-center justify-center bg-white">
@@ -297,13 +520,13 @@ export default function VotingBooth() {
                 {!task1Complete && (
                   <p className="text-sm text-gray-500">Complete previous task to unlock</p>
                 )}
-                {hasVoted && (
+                {hasVoted0 && (
                   <p className="text-sm text-green-600 font-medium">Voted</p>
                 )}
               </div>
             </div>
 
-            {task1Complete && (
+{task1Complete && (
               <div className="p-8 space-y-6">
                 {vote0Config.isPractice && (
                   <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
@@ -325,63 +548,398 @@ export default function VotingBooth() {
                     )}
                   </div>
 
-                  {hasVoted ? (
-                    <div className="space-y-4">
-                      <div className="bg-green-50 border-2 border-green-200 rounded-xl p-6 text-center">
-                        <p className="text-lg font-semibold text-green-800 mb-2">
-                          ✓ You voted!
-                        </p>
-                        <p className="text-gray-700">
-                          Your choice: <strong>{vote0Config.options.find(o => o.id === userVote)?.text}</strong>
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
+                  {/* Voting Section - Only shown if not voted */}
+                  {!hasVoted0 && electionStatus0 === "Open" && (
                     <>
-                      <div className="space-y-3">
-                        {vote0Config.options.map((option) => (
-                          <button
-                            key={option.id}
-                            onClick={() => setSelectedOption(option.id)}
-                            className={`w-full text-left px-6 py-4 border-2 rounded-xl transition-all duration-200 font-medium ${
-                              selectedOption === option.id
-                                ? "border-gray-900 bg-gray-900 text-white"
-                                : "border-gray-200 bg-gray-50 text-gray-900 hover:border-gray-400 hover:bg-white"
-                            }`}
-                          >
-                            {option.text}
-                          </button>
-                        ))}
+                      <div className="pt-2">
+                        <p className="text-sm font-semibold text-gray-700 mb-3">Cast Your Vote:</p>
+                        <div className="space-y-3">
+                          {vote0Config.options.map((option) => (
+                            <button
+                              key={option.id}
+                              onClick={() => setSelectedOption0(option.id)}
+                              className={`w-full text-left px-6 py-4 border-2 rounded-xl transition-all duration-200 font-medium ${
+                                selectedOption0 === option.id
+                                  ? "border-gray-900 bg-gray-900 text-white"
+                                  : "border-gray-200 bg-gray-50 text-gray-900 hover:border-gray-400 hover:bg-white"
+                              }`}
+                            >
+                              {option.text}
+                            </button>
+                          ))}
+                        </div>
                       </div>
 
                       <button
-                        onClick={handleVoteSubmit}
-                        disabled={selectedOption === null || isSubmitting}
+                        onClick={handleVoteSubmit0}
+                        disabled={selectedOption0 === null || isSubmitting0}
                         className="w-full bg-gray-900 text-white px-8 py-4 rounded-xl text-lg font-semibold transition-all duration-300 hover:bg-gray-800 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {isSubmitting ? "Submitting..." : "Submit Vote"}
+                        {isSubmitting0 ? "Submitting..." : "Submit Vote"}
                       </button>
                     </>
                   )}
+
+                  {/* Vote Confirmation - Shown after voting */}
+                  {hasVoted0 && (
+                    <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+                      <p className="text-sm font-semibold text-green-800">
+                        ✓ You voted for: <span className="font-bold">{vote0Config.options.find(o => o.id === userVote0)?.text}</span>
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Results Section - Always visible */}
+                  <div className="border-t-2 border-gray-200 pt-6 mt-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="text-lg font-bold text-gray-900">
+                          {electionStatus0 === "Closed" ? "Final Results" : "Live Results"}
+                        </h3>
+                        <p className="text-sm text-gray-600">
+                          {totalVotes0} {totalVotes0 === 1 ? "vote" : "votes"} cast
+                          {electionStatus0 === "Closed" && " • Voting closed"}
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleRefreshResults0}
+                        disabled={isRefreshingResults0}
+                        className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 border-2 border-gray-300 rounded-lg text-sm font-medium text-gray-700 transition-all disabled:opacity-50"
+                        title="Refresh results"
+                      >
+                        <svg 
+                          className={`w-4 h-4 ${isRefreshingResults0 ? 'animate-spin' : ''}`} 
+                          fill="none" 
+                          stroke="currentColor" 
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Refresh
+                      </button>
+                    </div>
+
+                    {electionStatus0 === "Closed" && (
+                      <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 mb-4">
+                        <p className="text-sm text-blue-800 font-medium text-center">
+                          🏁 These results are final
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="space-y-3">
+                      {vote0Config.options.map((option, index) => {
+                        const voteCount = voteCounts0[index] || 0;
+                        const percentage = totalVotes0 > 0 ? (voteCount / totalVotes0) * 100 : 0;
+                        const isWinner = electionStatus0 === "Closed" && voteCount > 0 && voteCount === Math.max(...voteCounts0);
+                        const isUserChoice = hasVoted0 && option.id === userVote0;
+
+                        return (
+                          <div
+                            key={option.id}
+                            className={`relative overflow-hidden rounded-xl border-2 transition-all ${
+                              isWinner
+                                ? "border-green-400 bg-green-50"
+                                : isUserChoice
+                                ? "border-blue-300 bg-blue-50"
+                                : "border-gray-200 bg-white"
+                            }`}
+                          >
+                            {/* Progress bar background */}
+                            <div 
+                              className={`absolute inset-0 transition-all duration-500 ${
+                                isWinner
+                                  ? "bg-green-100"
+                                  : isUserChoice
+                                  ? "bg-blue-100"
+                                  : "bg-gray-100"
+                              }`}
+                              style={{ width: `${percentage}%` }}
+                            />
+                            
+                            {/* Content */}
+                            <div className="relative px-4 py-3 flex items-center justify-between">
+                              <div className="flex-1 pr-4">
+                                <div className="flex items-center gap-2">
+                                  {isWinner && (
+                                    <span className="text-lg">🏆</span>
+                                  )}
+                                  {isUserChoice && !isWinner && (
+                                    <span className="text-blue-600 font-bold">→</span>
+                                  )}
+                                  <p className={`font-medium ${
+                                    isWinner ? "text-green-900 font-bold" : "text-gray-900"
+                                  }`}>
+                                    {option.text}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <div className="text-right">
+                                  <p className={`text-2xl font-bold ${
+                                    isWinner ? "text-green-700" : "text-gray-900"
+                                  }`}>
+                                    {percentage.toFixed(1)}%
+                                  </p>
+                                  <p className="text-xs text-gray-600">
+                                    {voteCount} {voteCount === 1 ? "vote" : "votes"}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Task 3 Preview (Locked) */}
-          <div className="bg-white rounded-2xl border-2 border-gray-100 overflow-hidden shadow-sm opacity-50">
-            <div className="flex items-center gap-4 px-6 py-4 bg-gray-50">
-              <div className="w-7 h-7 rounded-full border-2 border-gray-300 flex items-center justify-center bg-white">
-                <span className="text-sm font-bold text-gray-400">3</span>
+          {/* Task 3: Vote 1a - Coordination */}
+          {vote1aConfig && (
+            <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
+              hasVoted0 ? "border-gray-200" : "border-gray-100 opacity-50"
+            }`}>
+              <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
+                {hasVoted1a ? (
+                  <CheckCircleIcon className="w-7 h-7 text-green-600" />
+                ) : (
+                  <div className="w-7 h-7 rounded-full border-2 border-gray-400 flex items-center justify-center bg-white">
+                    <span className="text-sm font-bold text-gray-600">3</span>
+                  </div>
+                )}
+                <div className="flex-1">
+                  <h2 className="text-xl font-bold text-gray-900">
+                    {vote1aConfig.title}
+                  </h2>
+                  {!hasVoted0 && (
+                    <p className="text-sm text-gray-500">Complete previous task to unlock</p>
+                  )}
+                  {hasVoted1a && (
+                    <p className="text-sm text-green-600 font-medium">Voted</p>
+                  )}
+                </div>
               </div>
-              <div className="flex-1">
-                <h2 className="text-xl font-bold text-gray-400">
-                  Locked
-                </h2>
-                <p className="text-sm text-gray-400">Complete previous tasks to unlock</p>
-              </div>
+
+              {hasVoted0 && (
+                <div className="p-8 space-y-6">
+                  {/* District Assignment Banner */}
+                  {assignedDistrict && (
+                    <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
+                      <p className="text-sm font-semibold text-purple-900 text-center">
+                        📍 You live in: <span className="text-lg font-bold">District {assignedDistrict}</span>
+                      </p>
+                      <p className="text-xs text-purple-700 text-center mt-1">
+                        You'll benefit if funds are allocated to your district
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-base text-gray-700 mb-3 leading-relaxed whitespace-pre-line">
+                        {vote1aConfig.context}
+                      </p>
+                      <p className="text-lg font-bold text-gray-900 mt-4">
+                        {vote1aConfig.question}
+                      </p>
+                    </div>
+
+                    {/* Voting Section */}
+                    {!hasVoted1a && electionStatus1a === "Open" && (
+                      <>
+                        <div className="pt-2">
+                          <p className="text-sm font-semibold text-gray-700 mb-3">Cast Your Vote:</p>
+                          <div className="space-y-3">
+                            {vote1aConfig.options.map((option) => {
+                              const isHomeDistrict = assignedDistrict && option.text.includes(assignedDistrict);
+                              return (
+                                <button
+                                  key={option.id}
+                                  onClick={() => setSelectedOption1a(option.id)}
+                                  className={`w-full text-left px-6 py-4 border-2 rounded-xl transition-all duration-200 font-medium relative ${
+                                    selectedOption1a === option.id
+                                      ? "border-gray-900 bg-gray-900 text-white"
+                                      : isHomeDistrict
+                                      ? "border-purple-300 bg-purple-50 text-gray-900 hover:border-purple-400"
+                                      : "border-gray-200 bg-gray-50 text-gray-900 hover:border-gray-400 hover:bg-white"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span>{option.text}</span>
+                                    {isHomeDistrict && selectedOption1a !== option.id && (
+                                      <span className="text-xs text-purple-600 font-semibold">🏠 Your District</span>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={handleVoteSubmit1a}
+                          disabled={selectedOption1a === null || isSubmitting1a}
+                          className="w-full bg-gray-900 text-white px-8 py-4 rounded-xl text-lg font-semibold transition-all duration-300 hover:bg-gray-800 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSubmitting1a ? "Submitting..." : "Submit Vote"}
+                        </button>
+                      </>
+                    )}
+
+                    {/* Vote Confirmation */}
+                    {hasVoted1a && (
+                      <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+                        <p className="text-sm font-semibold text-green-800">
+                          ✓ You voted for: <span className="font-bold">{vote1aConfig.options.find(o => o.id === userVote1a)?.text}</span>
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Results Section with 60% Threshold */}
+                    <div className="border-t-2 border-gray-200 pt-6 mt-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h3 className="text-lg font-bold text-gray-900">
+                            {electionStatus1a === "Closed" ? "Final Results" : "Live Results"}
+                          </h3>
+                          <p className="text-sm text-gray-600">
+                            {totalVotes1a} {totalVotes1a === 1 ? "vote" : "votes"} cast
+                            {electionStatus1a === "Closed" && " • Voting closed"}
+                          </p>
+                        </div>
+                        <button
+                          onClick={handleRefreshResults1a}
+                          disabled={isRefreshingResults1a}
+                          className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 border-2 border-gray-300 rounded-lg text-sm font-medium text-gray-700 transition-all disabled:opacity-50"
+                          title="Refresh results"
+                        >
+                          <svg 
+                            className={`w-4 h-4 ${isRefreshingResults1a ? 'animate-spin' : ''}`} 
+                            fill="none" 
+                            stroke="currentColor" 
+                            viewBox="0 0 24 24"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          Refresh
+                        </button>
+                      </div>
+
+                      {/* 60% Threshold Alert */}
+                      {vote1aConfig.coordinationThreshold && voteCounts1a.some((count, index) => {
+                        const percentage = totalVotes1a > 0 ? (count / totalVotes1a) : 0;
+                        return percentage >= vote1aConfig.coordinationThreshold!;
+                      }) && (
+                        <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 mb-4">
+                          <p className="text-sm text-amber-900 font-bold text-center">
+                            🎓 60% Threshold Reached! A programming school will be opened!
+                          </p>
+                        </div>
+                      )}
+
+                      {electionStatus1a === "Closed" && (
+                        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 mb-4">
+                          <p className="text-sm text-blue-800 font-medium text-center">
+                            🏁 These results are final
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="space-y-3">
+                        {vote1aConfig.options.map((option, index) => {
+                          const voteCount = voteCounts1a[index] || 0;
+                          const percentage = totalVotes1a > 0 ? (voteCount / totalVotes1a) * 100 : 0;
+                          const isWinner = electionStatus1a === "Closed" && voteCount > 0 && voteCount === Math.max(...voteCounts1a);
+                          const isUserChoice = hasVoted1a && option.id === userVote1a;
+                          const isHomeDistrict = assignedDistrict && option.text.includes(assignedDistrict);
+                          const passedThreshold = vote1aConfig.coordinationThreshold && percentage >= (vote1aConfig.coordinationThreshold * 100);
+
+                          return (
+                            <div key={option.id} className="relative">
+                              <div
+                                className={`relative overflow-hidden rounded-xl border-2 transition-all ${
+                                  isWinner
+                                    ? "border-green-400 bg-green-50"
+                                    : passedThreshold
+                                    ? "border-amber-400 bg-amber-50"
+                                    : isUserChoice
+                                    ? "border-blue-300 bg-blue-50"
+                                    : isHomeDistrict
+                                    ? "border-purple-200 bg-purple-50"
+                                    : "border-gray-200 bg-white"
+                                }`}
+                              >
+                                {/* 60% Threshold Line */}
+                                {vote1aConfig.coordinationThreshold && (
+                                  <div 
+                                    className="absolute top-0 bottom-0 w-0.5 bg-red-400 z-10"
+                                    style={{ left: `${vote1aConfig.coordinationThreshold * 100}%` }}
+                                    title="60% threshold"
+                                  />
+                                )}
+
+                                {/* Progress bar */}
+                                <div 
+                                  className={`absolute inset-0 transition-all duration-500 ${
+                                    isWinner
+                                      ? "bg-green-100"
+                                      : passedThreshold
+                                      ? "bg-amber-100"
+                                      : isUserChoice
+                                      ? "bg-blue-100"
+                                      : isHomeDistrict
+                                      ? "bg-purple-100"
+                                      : "bg-gray-100"
+                                  }`}
+                                  style={{ width: `${percentage}%` }}
+                                />
+                                
+                                {/* Content */}
+                                <div className="relative px-4 py-3 flex items-center justify-between">
+                                  <div className="flex-1 pr-4">
+                                    <div className="flex items-center gap-2">
+                                      {isWinner && <span className="text-lg">🏆</span>}
+                                      {passedThreshold && !isWinner && <span className="text-lg">🎓</span>}
+                                      {isUserChoice && !isWinner && !passedThreshold && (
+                                        <span className="text-blue-600 font-bold">→</span>
+                                      )}
+                                      {isHomeDistrict && !isUserChoice && !passedThreshold && (
+                                        <span className="text-sm">🏠</span>
+                                      )}
+                                      <p className={`font-medium ${
+                                        isWinner || passedThreshold ? "font-bold" : ""
+                                      }`}>
+                                        {option.text}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-3">
+                                    <div className="text-right">
+                                      <p className={`text-2xl font-bold ${
+                                        isWinner ? "text-green-700" : passedThreshold ? "text-amber-700" : "text-gray-900"
+                                      }`}>
+                                        {percentage.toFixed(1)}%
+                                      </p>
+                                      <p className="text-xs text-gray-600">
+                                        {voteCount} {voteCount === 1 ? "vote" : "votes"}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
+          )}
         </div>
       </main>
       <ToastContainer

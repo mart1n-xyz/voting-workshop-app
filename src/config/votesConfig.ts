@@ -31,6 +31,10 @@ export interface VoteConfig {
   options: VoteOption[];
   // Whether this is a practice/training vote
   isPractice?: boolean;
+  // Whether users need district assignment
+  requiresDistrictAssignment?: boolean;
+  // Coordination threshold (e.g., 0.6 for 60%)
+  coordinationThreshold?: number;
 }
 
 /**
@@ -60,9 +64,11 @@ export const VOTES_CONFIG: Record<string, VoteConfig> = {
     voteKey: "vote1a",
     electionId: 2,
     type: "public",
-    title: "District Funding (Public)",
-    question: "Which district should receive the programming education grant?",
-    context: "You are a member of a worker cooperative in Río Plata Sur. The co-op has received a grant to expand programming education. Each of you lives in one of these districts and will benefit if funds are allocated to your district.",
+    title: "Vote 1a: Coordination",
+    question: "What is your preferred district?",
+    context: "You are a member of a worker cooperative in Río Plata Sur, a fictional mid-sized city in Argentina, that builds software for local businesses. The co-op has just received a grant to expand programming education across the city. Via programming bootcamps, it hopes to upskill participants to later recruit them. As voting members, you must decide how to allocate these funds across 4 districts.\n\nEach of you lives in one of these districts. You'll benefit if the funds are allocated to your district as you'll be running the bootcamps and rewarded for that.",
+    requiresDistrictAssignment: true,
+    coordinationThreshold: 0.6,
     options: [
       { id: 1, text: "District A" },
       { id: 2, text: "District B" },
@@ -185,5 +191,25 @@ export function getAllVoteKeys(): string[] {
  */
 export function getVoteByElectionId(electionId: number): VoteConfig | undefined {
   return Object.values(VOTES_CONFIG).find(vote => vote.electionId === electionId);
+}
+
+/**
+ * Get assigned district for a wallet address (deterministic)
+ * Uses simple hash to assign districts A, B, C, or D with equal probability
+ */
+export function getAssignedDistrict(walletAddress: string): string {
+  // Simple hash: sum of character codes
+  let hash = 0;
+  const normalized = walletAddress.toLowerCase();
+  
+  for (let i = 0; i < normalized.length; i++) {
+    hash = (hash * 31 + normalized.charCodeAt(i)) >>> 0;
+  }
+  
+  // Map to districts A, B, C, D (0-3)
+  const districtIndex = hash % 4;
+  const districts = ['A', 'B', 'C', 'D'];
+  
+  return districts[districtIndex];
 }
 
