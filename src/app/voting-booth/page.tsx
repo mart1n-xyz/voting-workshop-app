@@ -188,6 +188,18 @@ export default function VotingBooth() {
   const [electionStatus2d, setElectionStatus2d] = useState<"Open" | "Closed" | null>(null);
   const [vote2dCollapsed, setVote2dCollapsed] = useState(false);
   
+  // Vote 3 state (public)
+  const [selectedOption3, setSelectedOption3] = useState<number | null>(null);
+  const [isSubmitting3, setIsSubmitting3] = useState(false);
+  const [hasVoted3, setHasVoted3] = useState(false);
+  const [userVote3, setUserVote3] = useState<number | null>(null);
+  const [voteCounts3, setVoteCounts3] = useState<number[]>([]);
+  const [totalVotes3, setTotalVotes3] = useState(0);
+  const [electionStatus3, setElectionStatus3] = useState<"Open" | "Closed" | null>(null);
+  const [isRefreshingResults3, setIsRefreshingResults3] = useState(false);
+  const [votersByChoice3, setVotersByChoice3] = useState<Record<number, number[]>>({});
+  const [vote3Collapsed, setVote3Collapsed] = useState(false);
+  
   const vote0Config = getVoteConfig("vote0");
   const vote1aConfig = getVoteConfig("vote1a");
   const vote1bConfig = getVoteConfig("vote1b");
@@ -195,6 +207,7 @@ export default function VotingBooth() {
   const vote2bConfig = getVoteConfig("vote2b");
   const vote2cConfig = getVoteConfig("vote2c");
   const vote2dConfig = getVoteConfig("vote2d");
+  const vote3Config = getVoteConfig("vote3");
   
   // Vote 1b state (private vote)
   const [selectedOption1b, setSelectedOption1b] = useState<number | null>(null);
@@ -569,6 +582,67 @@ export default function VotingBooth() {
     }
   };
 
+  // Function to fetch election results for Vote 3 (public)
+  const fetchElectionResults3 = async (autoCollapseOnLoad = false) => {
+    if (!vote3Config) return;
+    
+    try {
+      const publicClient = createPublicClient({
+        chain: statusNetworkSepolia,
+        transport: http("https://public.sepolia.rpc.status.network"),
+      });
+
+      const election = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getElection",
+        args: [BigInt(vote3Config.electionId)],
+      });
+
+      const status = election.status === 1 ? "Open" : "Closed";
+      setElectionStatus3(status);
+      
+      if (autoCollapseOnLoad && status !== "Open") {
+        setVote3Collapsed(true);
+      }
+
+      const counts = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getElectionResults",
+        args: [BigInt(vote3Config.electionId), BigInt(vote3Config.options.length)],
+      });
+
+      const countsArray = counts.map(c => Number(c));
+      setVoteCounts3(countsArray);
+      setTotalVotes3(countsArray.reduce((sum, count) => sum + count, 0));
+
+      const allVotes = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getAllPublicVotes",
+        args: [BigInt(vote3Config.electionId)],
+      });
+
+      const [userIds, choices] = allVotes;
+      const votersByChoice: Record<number, number[]> = {};
+      userIds.forEach((userId: bigint, index: number) => {
+        const choice = Number(choices[index]);
+        if (!votersByChoice[choice]) {
+          votersByChoice[choice] = [];
+        }
+        votersByChoice[choice].push(Number(userId));
+      });
+
+      setVotersByChoice3(votersByChoice);
+    } catch (error) {
+      console.error("Error fetching results for vote 3:", error);
+      if (autoCollapseOnLoad) {
+        setVote3Collapsed(true);
+      }
+    }
+  };
+
   // Function to fetch election results for Vote 1a
   const fetchElectionResults1a = async (autoCollapseOnLoad = false) => {
     if (!vote1aConfig) return;
@@ -841,6 +915,30 @@ export default function VotingBooth() {
             await fetchElectionStatus2d(true);
           }
           
+          // Check if user has voted in vote 3 (public)
+          if (vote3Config) {
+            const voted3 = await publicClient.readContract({
+              address: VOTING_CONTRACT_ADDRESS,
+              abi: VOTING_WORKSHOP_ABI,
+              functionName: "hasUserVoted",
+              args: [BigInt(vote3Config.electionId), walletAddress as `0x${string}`],
+            });
+            
+            setHasVoted3(voted3);
+            
+            if (voted3) {
+              const choice = await publicClient.readContract({
+                address: VOTING_CONTRACT_ADDRESS,
+                abi: publicVotesABI,
+                functionName: "publicVotes",
+                args: [BigInt(vote3Config.electionId), id],
+              });
+              setUserVote3(Number(choice));
+            }
+            
+            await fetchElectionResults3(true);
+          }
+          
           setLoading(false);
         }
       } catch (error) {
@@ -851,7 +949,7 @@ export default function VotingBooth() {
 
     checkRegistrationAndVotes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, authenticated, user, router, vote0Config, vote1aConfig, vote1bConfig, vote2aConfig, vote2bConfig, vote2cConfig, vote2dConfig]);
+  }, [ready, authenticated, user, router, vote0Config, vote1aConfig, vote1bConfig, vote2aConfig, vote2bConfig, vote2cConfig, vote2dConfig, vote3Config]);
 
   // Auto-refresh results for Vote 0 every 5 seconds (only when Open)
   useEffect(() => {
@@ -937,6 +1035,18 @@ export default function VotingBooth() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vote2dConfig, task1Complete, hasVoted2c, electionStatus2d]);
 
+  // Auto-refresh results for Vote 3 every 5 seconds (only when Open)
+  useEffect(() => {
+    if (!vote3Config || !task1Complete || !hasVoted2d || electionStatus3 !== "Open") return;
+
+    const intervalId = setInterval(() => {
+      fetchElectionResults3();
+    }, 5000);
+
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vote3Config, task1Complete, hasVoted2d, electionStatus3]);
+
   const handleRefreshResults0 = async () => {
     setIsRefreshingResults0(true);
     await fetchElectionResults0();
@@ -959,6 +1069,12 @@ export default function VotingBooth() {
     setIsRefreshingResults2b(true);
     await fetchElectionResults2b();
     setTimeout(() => setIsRefreshingResults2b(false), 300);
+  };
+
+  const handleRefreshResults3 = async () => {
+    setIsRefreshingResults3(true);
+    await fetchElectionResults3();
+    setTimeout(() => setIsRefreshingResults3(false), 300);
   };
 
   const handleVoteSubmit0 = async () => {
@@ -1138,6 +1254,40 @@ export default function VotingBooth() {
     }
   };
 
+  const handleVoteSubmit3 = async () => {
+    if (selectedOption3 === null || !vote3Config) {
+      showErrorToast("Please select an option");
+      return;
+    }
+
+    setIsSubmitting3(true);
+
+    try {
+      const data = encodeFunctionData({
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "castPublicVote",
+        args: [BigInt(vote3Config.electionId), BigInt(selectedOption3)],
+      });
+
+      await sendTransaction({
+        to: VOTING_CONTRACT_ADDRESS,
+        data: data,
+        value: BigInt(0),
+      });
+
+      showSuccessToast("Vote submitted successfully!");
+      setHasVoted3(true);
+      setUserVote3(selectedOption3);
+      
+      setTimeout(() => fetchElectionResults3(), 1500);
+    } catch (error: any) {
+      console.error("Vote submission error:", error);
+      showErrorToast(error?.message || "Failed to submit vote. Please try again.");
+    } finally {
+      setIsSubmitting3(false);
+    }
+  };
+
   const handleOpenVoterList = async () => {
     if (allVoters.length === 0) {
       await fetchAllVoters();
@@ -1174,7 +1324,7 @@ export default function VotingBooth() {
     return <FullScreenLoader />;
   }
 
-  if (isSubmitting0 || isSubmitting1a || isSubmitting1b || isSubmitting2a || isSubmitting2b || isSubmitting2c || isSubmitting2d) {
+  if (isSubmitting0 || isSubmitting1a || isSubmitting1b || isSubmitting2a || isSubmitting2b || isSubmitting2c || isSubmitting2d || isSubmitting3) {
     return <FullScreenLoader message="Submitting your vote..." />;
   }
 
@@ -1560,11 +1710,11 @@ export default function VotingBooth() {
                 <div className="p-8 space-y-6">
                   {/* District Assignment Banner */}
                   {assignedDistrict && (
-                    <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
-                      <p className="text-sm font-semibold text-purple-900 text-center">
+                    <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                      <p className="text-sm font-semibold text-blue-900 text-center">
                         📍 You live in: <span className="text-lg font-bold">District {assignedDistrict}</span>
                       </p>
-                      <p className="text-xs text-purple-700 text-center mt-1">
+                      <p className="text-xs text-blue-700 text-center mt-1">
                         You&apos;ll benefit if funds are allocated to your district
                       </p>
                     </div>
@@ -1608,14 +1758,14 @@ export default function VotingBooth() {
                                     selectedOption1a === option.id
                                       ? "border-gray-900 bg-gray-900 text-white"
                                       : isHomeDistrict
-                                      ? "border-purple-300 bg-purple-50 text-gray-900 hover:border-purple-400"
+                                      ? "border-blue-300 bg-blue-50 text-gray-900 hover:border-blue-400"
                                       : "border-gray-200 bg-gray-50 text-gray-900 hover:border-gray-400 hover:bg-white"
                                   }`}
                                 >
                                   <div className="flex items-center justify-between">
                                     <span>{option.text}</span>
                                     {isHomeDistrict && selectedOption1a !== option.id && (
-                                      <span className="text-xs text-purple-600 font-semibold">🏠 Your District</span>
+                                      <span className="text-xs text-blue-600 font-semibold">🏠 Your District</span>
                                     )}
                                   </div>
                                 </button>
@@ -1714,8 +1864,6 @@ export default function VotingBooth() {
                                     ? "border-amber-400 bg-amber-50"
                                     : isUserChoice
                                     ? "border-blue-300 bg-blue-50"
-                                    : isHomeDistrict
-                                    ? "border-purple-200 bg-purple-50"
                                     : "border-gray-200 bg-white"
                                 }`}
                               >
@@ -1738,8 +1886,6 @@ export default function VotingBooth() {
                                         ? "bg-amber-100"
                                         : isUserChoice
                                         ? "bg-blue-100"
-                                        : isHomeDistrict
-                                        ? "bg-purple-100"
                                         : "bg-gray-100"
                                     }`}
                                     style={{ width: `${percentage}%` }}
@@ -1788,8 +1934,6 @@ export default function VotingBooth() {
                                       ? "border-amber-200 bg-amber-50"
                                       : isUserChoice
                                       ? "border-blue-200 bg-blue-50"
-                                      : isHomeDistrict
-                                      ? "border-purple-200 bg-purple-50"
                                       : "border-gray-200 bg-gray-50"
                                   }`}>
                                     <p className="text-xs text-gray-600 mb-1">Voters:</p>
@@ -2840,6 +2984,268 @@ export default function VotingBooth() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Task 9: Vote 3 - Merit vs Luck */}
+          {vote3Config && (
+            <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
+              hasVoted2d ? "border-gray-200" : "border-gray-100 opacity-50"
+            }`}>
+              <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
+                {hasVoted3 ? (
+                  <CheckCircleIcon className="w-7 h-7 text-green-600" />
+                ) : (
+                  <div className="w-7 h-7 rounded-full border-2 border-gray-400 flex items-center justify-center bg-white">
+                    <span className="text-sm font-bold text-gray-600">9</span>
+                  </div>
+                )}
+                <div className="flex-1">
+                  <h2 className="text-xl font-bold text-gray-900">
+                    {vote3Config.title}
+                  </h2>
+                  {!hasVoted2d && (
+                    <p className="text-sm text-gray-500">Complete previous task to unlock</p>
+                  )}
+                  {hasVoted3 && electionStatus3 === "Open" && (
+                    <p className="text-sm text-green-600 font-medium">Voted</p>
+                  )}
+                  {electionStatus3 === "Closed" && (
+                    <p className="text-sm text-blue-600 font-medium">Closed</p>
+                  )}
+                  {electionStatus3 === null && hasVoted2d && (
+                    <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
+                  )}
+                </div>
+                {hasVoted2d && (
+                  <button
+                    onClick={() => setVote3Collapsed(!vote3Collapsed)}
+                    className="text-sm text-gray-500 hover:text-gray-700 underline"
+                  >
+                    {vote3Collapsed ? "Expand" : "Collapse"}
+                  </button>
+                )}
+              </div>
+
+              {hasVoted2d && !vote3Collapsed && (
+                <div className="px-6 py-6 space-y-6">
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-base text-gray-700 mb-3 leading-relaxed whitespace-pre-line">
+                        {vote3Config.context}
+                      </p>
+                      <p className="text-lg font-bold text-gray-900 mt-4">
+                        {vote3Config.question}
+                      </p>
+                    </div>
+
+                    {electionStatus3 === null && (
+                      <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-6 text-center">
+                        <p className="text-lg font-semibold text-amber-900 mb-2">
+                          ⏳ Waiting for Vote to Open
+                        </p>
+                        <p className="text-sm text-amber-700">
+                          The organizer will open this vote when ready. Please wait.
+                        </p>
+                      </div>
+                    )}
+
+                    {!hasVoted3 && electionStatus3 === "Open" && (
+                      <>
+                        <div className="pt-2">
+                          <p className="text-sm font-semibold text-gray-700 mb-3">Cast Your Vote:</p>
+                          <div className="space-y-3">
+                            {vote3Config.options.map((option) => (
+                              <button
+                                key={option.id}
+                                onClick={() => setSelectedOption3(option.id)}
+                                className={`w-full text-left px-6 py-4 border-2 rounded-xl transition-all duration-200 font-medium ${
+                                  selectedOption3 === option.id
+                                    ? "border-gray-900 bg-gray-900 text-white"
+                                    : "border-gray-200 bg-gray-50 text-gray-900 hover:border-gray-400 hover:bg-white"
+                                }`}
+                              >
+                                {option.text}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={handleVoteSubmit3}
+                          disabled={selectedOption3 === null || isSubmitting3}
+                          className="w-full bg-gray-900 text-white px-8 py-4 rounded-xl text-lg font-semibold transition-all duration-300 hover:bg-gray-800 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSubmitting3 ? "Submitting..." : "Submit Vote"}
+                        </button>
+
+                        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                          <p className="text-xs text-blue-800">
+                            <strong>Note:</strong> This vote is fully public. All participants can see who voted for each option. Open discussion is encouraged.
+                          </p>
+                        </div>
+                      </>
+                    )}
+
+                    {hasVoted3 && (
+                      <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+                        <p className="text-sm font-semibold text-green-800">
+                          ✓ You voted for: <span className="font-bold">{vote3Config.options.find(o => o.id === userVote3)?.text}</span>
+                        </p>
+                      </div>
+                    )}
+
+                    {electionStatus3 !== null && (
+                      <div className="border-t-2 border-gray-200 pt-6 mt-6">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <h3 className="text-lg font-bold text-gray-900">
+                              {electionStatus3 === "Closed" ? "Final Results" : "Live Results"}
+                            </h3>
+                            <p className="text-sm text-gray-600">
+                              {totalVotes3} {totalVotes3 === 1 ? "vote" : "votes"} cast
+                              {electionStatus3 === "Closed" && " • Voting closed"}
+                            </p>
+                          </div>
+                          <button
+                            onClick={handleRefreshResults3}
+                            disabled={isRefreshingResults3}
+                            className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 border-2 border-gray-300 rounded-lg text-sm font-medium text-gray-700 transition-all disabled:opacity-50"
+                          >
+                            <svg 
+                              className={`w-4 h-4 ${isRefreshingResults3 ? 'animate-spin' : ''}`} 
+                              fill="none" 
+                              stroke="currentColor" 
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            Refresh
+                          </button>
+                        </div>
+
+                        {electionStatus3 === "Closed" && (
+                          <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 mb-4">
+                            <p className="text-sm text-blue-800 font-medium text-center">
+                              🏁 These results are final
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="space-y-3">
+                          {vote3Config.options.map((option, index) => {
+                            const voteCount = voteCounts3[index] || 0;
+                            const percentage = totalVotes3 > 0 ? (voteCount / totalVotes3) * 100 : 0;
+                            const isWinner = electionStatus3 === "Closed" && voteCount > 0 && voteCount === Math.max(...voteCounts3);
+                            const isUserChoice = hasVoted3 && option.id === userVote3;
+                            const voters = votersByChoice3[option.id] || [];
+
+                            return (
+                              <div
+                                key={option.id}
+                                className={`rounded-xl border-2 transition-all overflow-hidden ${
+                                  isWinner
+                                    ? "border-green-400 bg-green-50"
+                                    : isUserChoice
+                                    ? "border-blue-300 bg-blue-50"
+                                    : "border-gray-200 bg-white"
+                                }`}
+                              >
+                                <div className="relative overflow-hidden">
+                                  <div 
+                                    className={`absolute inset-0 transition-all duration-500 ${
+                                      isWinner
+                                        ? "bg-green-100"
+                                        : isUserChoice
+                                        ? "bg-blue-100"
+                                        : "bg-gray-100"
+                                    }`}
+                                    style={{ width: `${percentage}%` }}
+                                  />
+                                  
+                                  <div className="relative px-4 py-3 flex items-center justify-between">
+                                    <div className="flex-1 pr-4">
+                                      <div className="flex items-center gap-2">
+                                        {isWinner && <span className="text-lg">🏆</span>}
+                                        {isUserChoice && !isWinner && (
+                                          <span className="text-blue-600 font-bold">→</span>
+                                        )}
+                                        <p className={`font-medium ${
+                                          isWinner ? "text-green-900 font-bold" : "text-gray-900"
+                                        }`}>
+                                          {option.text}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                      <div className="text-right">
+                                        <p className={`text-2xl font-bold ${
+                                          isWinner ? "text-green-700" : "text-gray-900"
+                                        }`}>
+                                          {percentage.toFixed(1)}%
+                                        </p>
+                                        <p className="text-xs text-gray-600">
+                                          {voteCount} {voteCount === 1 ? "vote" : "votes"}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                {voters.length > 0 && (
+                                  <div className={`px-4 py-2 border-t ${
+                                    isWinner
+                                      ? "border-green-200 bg-green-50"
+                                      : isUserChoice
+                                      ? "border-blue-200 bg-blue-50"
+                                      : "border-gray-200 bg-gray-50"
+                                  }`}>
+                                    <p className="text-xs text-gray-600 mb-1">Voters:</p>
+                                    <div className="flex flex-wrap gap-1">
+                                      {voters.map((voterId) => (
+                                        <span
+                                          key={voterId}
+                                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                            voterId === Number(userId)
+                                              ? "bg-blue-200 text-blue-800"
+                                              : "bg-gray-200 text-gray-700"
+                                          }`}
+                                        >
+                                          #{voterId}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Completion Message */}
+          {hasVoted0 && hasVoted1a && hasVoted1b && hasVoted2a && hasVoted2b && hasVoted2c && hasVoted2d && hasVoted3 && (
+            <div className="text-center py-12 px-6">
+              <div className="max-w-2xl mx-auto space-y-4">
+                <h2 className="text-4xl md:text-5xl font-bold text-gray-900">
+                  🎉 Thank You! 🎉
+                </h2>
+                <p className="text-xl md:text-2xl text-gray-700 font-medium">
+                  You&apos;ve completed all voting exercises!
+                </p>
+                <p className="text-lg text-gray-600 leading-relaxed">
+                  Thank you for your active participation in this workshop. We hope you enjoyed exploring the fascinating dynamics of coordination, reciprocity, and collective decision-making.
+                </p>
+                <p className="text-base text-gray-500 italic">
+                  The organizer will announce the final results and prize winners shortly.
+                </p>
+              </div>
             </div>
           )}
         </div>

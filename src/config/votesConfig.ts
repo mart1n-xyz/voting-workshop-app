@@ -164,17 +164,17 @@ export const VOTES_CONFIG: Record<string, VoteConfig> = {
     ],
   },
 
-  // Vote 3: Prize Distribution
+  // Vote 3: Merit vs Luck
   vote3: {
     voteKey: "vote3",
     electionId: 8,
     type: "public",
-    title: "Prize Distribution Method",
-    question: "How should the 3rd place prize be awarded?",
-    context: "Decide whether the book prize should go to 3rd place or be randomly distributed among all participants.",
+    title: "Vote 3: Merit vs Luck",
+    question: "How should Book #2 be awarded?",
+    context: "We're almost done with this workshop. Three prizes will be awarded based on the final points leaderboard. The 3rd place prize is a copy of \"Farewell to Westphalia\" by Jarrad Hope and Peter Ludlow.\n\nThe organizer will announce who is currently in 3rd place before the vote. You can decide how this book should be awarded.\n\nThis vote is fully public – everyone can see who supports each option. Open discussion is encouraged.",
     options: [
-      { id: 1, text: "RANK-3: Award to participant in 3rd place" },
-      { id: 2, text: "RANDOM: Random draw among all participants" },
+      { id: 1, text: "Award to current 3rd place participant" },
+      { id: 2, text: "Random draw among all participants" },
     ],
   },
 };
