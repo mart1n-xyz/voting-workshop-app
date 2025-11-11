@@ -1735,7 +1735,7 @@ export default function VotingBooth() {
                           <p className="text-sm font-semibold text-gray-700 mb-3">Cast Your Vote:</p>
                           <div className="space-y-3">
                             {vote1aConfig.options.map((option) => {
-                              const isHomeDistrict = assignedDistrict && option.text.includes(assignedDistrict);
+                              const isHomeDistrict = assignedDistrict && option.text === `District ${assignedDistrict}`;
                               return (
                                 <button
                                   key={option.id}
@@ -1836,7 +1836,7 @@ export default function VotingBooth() {
                           const percentage = totalVotes1a > 0 ? (voteCount / totalVotes1a) * 100 : 0;
                           const isWinner = electionStatus1a === "Closed" && voteCount > 0 && voteCount === Math.max(...voteCounts1a);
                           const isUserChoice = hasVoted1a && option.id === userVote1a;
-                          const isHomeDistrict = assignedDistrict && option.text.includes(assignedDistrict);
+                          const isHomeDistrict = assignedDistrict && option.text === `District ${assignedDistrict}`;
                           const passedThreshold = vote1aConfig.coordinationThreshold && percentage >= (vote1aConfig.coordinationThreshold * 100);
                           const voters = votersByChoice1a[option.id] || [];
 
@@ -2028,7 +2028,7 @@ export default function VotingBooth() {
                           <p className="text-sm font-semibold text-gray-700 mb-3">Cast Your Private Vote:</p>
                           <div className="space-y-3">
                             {vote1bConfig.options.map((option) => {
-                              const isHomeDistrict = assignedDistrict1b && option.text.includes(assignedDistrict1b);
+                              const isHomeDistrict = assignedDistrict1b && option.text === `District ${assignedDistrict1b}`;
                               return (
                                 <button
                                   key={option.id}
