@@ -18,6 +18,20 @@ const VOTE_1B_OPTIONS = [
   "I vote for District D",
 ];
 
+const VOTE_2C_OPTIONS = [
+  "I vote for A – Citywide Campaign (Marketing)",
+  "I vote for B – Process Upgrade (Operations)",
+  "I vote for C – Community Program (Community)",
+  "I vote for D – Shared Hub (Everyone)",
+];
+
+const VOTE_2D_OPTIONS = [
+  "I vote for A – Citywide Campaign (Marketing)",
+  "I vote for B – Process Upgrade (Operations)",
+  "I vote for C – Community Program (Community)",
+  "I vote for D – Shared Hub (Everyone, bonus if ≥50%)",
+];
+
 /**
  * Parse transaction input data to extract encrypted signature
  * 
@@ -207,5 +221,7 @@ module.exports = {
   verifyVoteSignature,
   decryptAndVerifyVote,
   VOTE_1B_OPTIONS,
+  VOTE_2C_OPTIONS,
+  VOTE_2D_OPTIONS,
 };
 

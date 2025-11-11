@@ -100,9 +100,10 @@ export const VOTES_CONFIG: Record<string, VoteConfig> = {
     voteKey: "vote2a",
     electionId: 4,
     type: "public",
-    title: "Strategic Initiative - Round 1 (Public)",
-    question: "Which strategic initiative should the co-op prioritize?",
-    context: "The co-op must decide which initiative to prioritize. Members belong to different committees with different interests.",
+    title: "Vote 2a: Strategic Initiative - Round 1 (Public)",
+    question: "Which strategic initiative should the co-op prioritize for the next quarter?",
+    context: "The co-op must decide which strategic initiative to prioritize. Members are organized into three committees: Marketing, Operations, and Community. Each committee has different priorities.",
+    requiresDistrictAssignment: false,
     options: [
       { id: 1, text: "A – Citywide Campaign (Marketing)" },
       { id: 2, text: "B – Process Upgrade (Operations)" },
@@ -116,9 +117,10 @@ export const VOTES_CONFIG: Record<string, VoteConfig> = {
     voteKey: "vote2b",
     electionId: 5,
     type: "public",
-    title: "Strategic Initiative - Round 2 (Public)",
-    question: "Which strategic initiative should the co-op prioritize?",
-    context: "Same decision, still public. Committees are expected to honor their earlier promises.",
+    title: "Vote 2b: Strategic Initiative - Round 2 (Public)",
+    question: "Which strategic initiative should the co-op prioritize for the next quarter?",
+    context: "Same decision as before, votes remain public.",
+    requiresDistrictAssignment: false,
     options: [
       { id: 1, text: "A – Citywide Campaign (Marketing)" },
       { id: 2, text: "B – Process Upgrade (Operations)" },
@@ -132,9 +134,10 @@ export const VOTES_CONFIG: Record<string, VoteConfig> = {
     voteKey: "vote2c",
     electionId: 6,
     type: "private",
-    title: "Strategic Initiative - Round 3 (Private)",
-    question: "Which strategic initiative should the co-op prioritize?",
-    context: "Same decision, but now votes are secret. Will alliances remain stable?",
+    title: "Vote 2c: Strategic Initiative - Round 3 (Private)",
+    question: "Which strategic initiative should the co-op prioritize for the next quarter?",
+    context: "Same decision as before, but now votes are secret. No one can see your choice until the organizer reveals results.",
+    requiresDistrictAssignment: false,
     options: [
       { id: 1, text: "A – Citywide Campaign (Marketing)" },
       { id: 2, text: "B – Process Upgrade (Operations)" },
@@ -148,14 +151,16 @@ export const VOTES_CONFIG: Record<string, VoteConfig> = {
     voteKey: "vote2d",
     electionId: 7,
     type: "private",
-    title: "Strategic Initiative - Round 4 (Private, Final)",
-    question: "Which strategic initiative should the co-op prioritize?",
-    context: "BONUS REVEALED: If D (Shared Hub) receives 50% or more votes, every D voter earns a +8 point bonus!",
+    title: "Vote 2d: Strategic Initiative - Round 4 (Final, Private)",
+    question: "Which strategic initiative should the co-op prioritize for the next quarter?",
+    context: "Votes remain private - no one can see your choice.",
+    requiresDistrictAssignment: false,
+    coordinationThreshold: 0.5,
     options: [
       { id: 1, text: "A – Citywide Campaign (Marketing)" },
       { id: 2, text: "B – Process Upgrade (Operations)" },
       { id: 3, text: "C – Community Program (Community)" },
-      { id: 4, text: "D – Shared Hub (Everyone, +8 bonus if ≥50%)" },
+      { id: 4, text: "D – Shared Hub (Everyone, bonus if ≥50%)" },
     ],
   },
 
@@ -218,5 +223,29 @@ export function getAssignedDistrict(walletAddress: string, seed: string = "defau
   const districts = ['A', 'B', 'C', 'D'];
   
   return districts[districtIndex];
+}
+
+/**
+ * Get assigned committee for a wallet address (deterministic)
+ * Uses simple hash to assign one of three committees with equal probability
+ * 
+ * @param walletAddress - The wallet address to assign a committee to
+ * @returns Committee name: "Marketing", "Operations", or "Community"
+ */
+export function getAssignedCommittee(walletAddress: string): string {
+  // Simple hash: sum of character codes
+  let hash = 0;
+  const normalized = walletAddress.toLowerCase();
+  const input = normalized + "committee"; // Add seed for committee assignment
+  
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
+  }
+  
+  // Map to committees (0-2) - equal probability
+  const committeeIndex = hash % 3;
+  const committees = ['Marketing', 'Operations', 'Community'];
+  
+  return committees[committeeIndex];
 }
 

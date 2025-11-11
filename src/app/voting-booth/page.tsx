@@ -10,7 +10,7 @@ import { statusNetworkSepolia } from "viem/chains";
 import { CheckCircleIcon } from "@heroicons/react/24/solid";
 import { ToastContainer } from "react-toastify";
 import { showSuccessToast, showErrorToast } from "@/components/ui/custom-toast";
-import { getVoteConfig, VOTING_CONTRACT_ADDRESS, getAssignedDistrict } from "@/config/votesConfig";
+import { getVoteConfig, VOTING_CONTRACT_ADDRESS, getAssignedDistrict, getAssignedCommittee } from "@/config/votesConfig";
 import { usePrivateVoting } from "@/hooks/usePrivateVoting";
 
 const VOTING_WORKSHOP_ABI = [
@@ -131,9 +131,52 @@ export default function VotingBooth() {
   // Vote 1b has its own district assignment (independent from 1a)
   const [assignedDistrict1b, setAssignedDistrict1b] = useState<string | null>(null);
   
+  // Committee assignment (same for all votes 2a-2d)
+  const [assignedCommittee, setAssignedCommittee] = useState<string | null>(null);
+  
+  // Vote 2a state (public)
+  const [selectedOption2a, setSelectedOption2a] = useState<number | null>(null);
+  const [isSubmitting2a, setIsSubmitting2a] = useState(false);
+  const [hasVoted2a, setHasVoted2a] = useState(false);
+  const [userVote2a, setUserVote2a] = useState<number | null>(null);
+  const [voteCounts2a, setVoteCounts2a] = useState<number[]>([]);
+  const [totalVotes2a, setTotalVotes2a] = useState(0);
+  const [electionStatus2a, setElectionStatus2a] = useState<"Open" | "Closed" | null>(null);
+  const [isRefreshingResults2a, setIsRefreshingResults2a] = useState(false);
+  const [votersByChoice2a, setVotersByChoice2a] = useState<Record<number, number[]>>({});
+  const [vote2aCollapsed, setVote2aCollapsed] = useState(false);
+  
+  // Vote 2b state (public)
+  const [selectedOption2b, setSelectedOption2b] = useState<number | null>(null);
+  const [isSubmitting2b, setIsSubmitting2b] = useState(false);
+  const [hasVoted2b, setHasVoted2b] = useState(false);
+  const [userVote2b, setUserVote2b] = useState<number | null>(null);
+  const [voteCounts2b, setVoteCounts2b] = useState<number[]>([]);
+  const [totalVotes2b, setTotalVotes2b] = useState(0);
+  const [electionStatus2b, setElectionStatus2b] = useState<"Open" | "Closed" | null>(null);
+  const [isRefreshingResults2b, setIsRefreshingResults2b] = useState(false);
+  const [votersByChoice2b, setVotersByChoice2b] = useState<Record<number, number[]>>({});
+  const [vote2bCollapsed, setVote2bCollapsed] = useState(false);
+  
+  // Vote 2c state (private)
+  const [selectedOption2c, setSelectedOption2c] = useState<number | null>(null);
+  const [hasVoted2c, setHasVoted2c] = useState(false);
+  const [electionStatus2c, setElectionStatus2c] = useState<"Open" | "Closed" | null>(null);
+  const [vote2cCollapsed, setVote2cCollapsed] = useState(false);
+  
+  // Vote 2d state (private with bonus)
+  const [selectedOption2d, setSelectedOption2d] = useState<number | null>(null);
+  const [hasVoted2d, setHasVoted2d] = useState(false);
+  const [electionStatus2d, setElectionStatus2d] = useState<"Open" | "Closed" | null>(null);
+  const [vote2dCollapsed, setVote2dCollapsed] = useState(false);
+  
   const vote0Config = getVoteConfig("vote0");
   const vote1aConfig = getVoteConfig("vote1a");
   const vote1bConfig = getVoteConfig("vote1b");
+  const vote2aConfig = getVoteConfig("vote2a");
+  const vote2bConfig = getVoteConfig("vote2b");
+  const vote2cConfig = getVoteConfig("vote2c");
+  const vote2dConfig = getVoteConfig("vote2d");
   
   // Vote 1b state (private vote)
   const [selectedOption1b, setSelectedOption1b] = useState<number | null>(null);
@@ -147,6 +190,32 @@ export default function VotingBooth() {
       showSuccessToast("Your private vote has been recorded!");
       setHasVoted1b(true);
       setTimeout(() => fetchElectionStatus1b(), 1500);
+    },
+    onError: (error) => {
+      showErrorToast(error);
+    },
+  });
+  
+  // Private voting hook for vote 2c
+  const { submitPrivateVote: submitVote2c, isSubmitting: isSubmitting2c } = usePrivateVoting({
+    voteConfig: vote2cConfig!,
+    onSuccess: () => {
+      showSuccessToast("Your private vote has been recorded!");
+      setHasVoted2c(true);
+      setTimeout(() => fetchElectionStatus2c(), 1500);
+    },
+    onError: (error) => {
+      showErrorToast(error);
+    },
+  });
+  
+  // Private voting hook for vote 2d
+  const { submitPrivateVote: submitVote2d, isSubmitting: isSubmitting2d } = usePrivateVoting({
+    voteConfig: vote2dConfig!,
+    onSuccess: () => {
+      showSuccessToast("Your private vote has been recorded!");
+      setHasVoted2d(true);
+      setTimeout(() => fetchElectionStatus2d(), 1500);
     },
     onError: (error) => {
       showErrorToast(error);
@@ -252,6 +321,190 @@ export default function VotingBooth() {
       // If election doesn't exist yet, auto-collapse on load
       if (autoCollapseOnLoad) {
         setVote1bCollapsed(true);
+      }
+    }
+  };
+
+  // Function to fetch election results for Vote 2a (public)
+  const fetchElectionResults2a = async (autoCollapseOnLoad = false) => {
+    if (!vote2aConfig) return;
+    
+    try {
+      const publicClient = createPublicClient({
+        chain: statusNetworkSepolia,
+        transport: http("https://public.sepolia.rpc.status.network"),
+      });
+
+      const election = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getElection",
+        args: [BigInt(vote2aConfig.electionId)],
+      });
+
+      const status = election.status === 1 ? "Open" : "Closed";
+      setElectionStatus2a(status);
+      
+      if (autoCollapseOnLoad && status !== "Open") {
+        setVote2aCollapsed(true);
+      }
+
+      const counts = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getElectionResults",
+        args: [BigInt(vote2aConfig.electionId), BigInt(vote2aConfig.options.length)],
+      });
+
+      const countsArray = counts.map(c => Number(c));
+      setVoteCounts2a(countsArray);
+      setTotalVotes2a(countsArray.reduce((sum, count) => sum + count, 0));
+
+      const allVotes = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getAllPublicVotes",
+        args: [BigInt(vote2aConfig.electionId)],
+      });
+
+      const [userIds, choices] = allVotes;
+      const votersByChoice: Record<number, number[]> = {};
+      userIds.forEach((userId: bigint, index: number) => {
+        const choice = Number(choices[index]);
+        if (!votersByChoice[choice]) {
+          votersByChoice[choice] = [];
+        }
+        votersByChoice[choice].push(Number(userId));
+      });
+
+      setVotersByChoice2a(votersByChoice);
+    } catch (error) {
+      console.error("Error fetching results for vote 2a:", error);
+      if (autoCollapseOnLoad) {
+        setVote2aCollapsed(true);
+      }
+    }
+  };
+
+  // Function to fetch election results for Vote 2b (public)
+  const fetchElectionResults2b = async (autoCollapseOnLoad = false) => {
+    if (!vote2bConfig) return;
+    
+    try {
+      const publicClient = createPublicClient({
+        chain: statusNetworkSepolia,
+        transport: http("https://public.sepolia.rpc.status.network"),
+      });
+
+      const election = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getElection",
+        args: [BigInt(vote2bConfig.electionId)],
+      });
+
+      const status = election.status === 1 ? "Open" : "Closed";
+      setElectionStatus2b(status);
+      
+      if (autoCollapseOnLoad && status !== "Open") {
+        setVote2bCollapsed(true);
+      }
+
+      const counts = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getElectionResults",
+        args: [BigInt(vote2bConfig.electionId), BigInt(vote2bConfig.options.length)],
+      });
+
+      const countsArray = counts.map(c => Number(c));
+      setVoteCounts2b(countsArray);
+      setTotalVotes2b(countsArray.reduce((sum, count) => sum + count, 0));
+
+      const allVotes = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getAllPublicVotes",
+        args: [BigInt(vote2bConfig.electionId)],
+      });
+
+      const [userIds, choices] = allVotes;
+      const votersByChoice: Record<number, number[]> = {};
+      userIds.forEach((userId: bigint, index: number) => {
+        const choice = Number(choices[index]);
+        if (!votersByChoice[choice]) {
+          votersByChoice[choice] = [];
+        }
+        votersByChoice[choice].push(Number(userId));
+      });
+
+      setVotersByChoice2b(votersByChoice);
+    } catch (error) {
+      console.error("Error fetching results for vote 2b:", error);
+      if (autoCollapseOnLoad) {
+        setVote2bCollapsed(true);
+      }
+    }
+  };
+
+  // Function to fetch election status for Vote 2c (private)
+  const fetchElectionStatus2c = async (autoCollapseOnLoad = false) => {
+    if (!vote2cConfig) return;
+    
+    try {
+      const publicClient = createPublicClient({
+        chain: statusNetworkSepolia,
+        transport: http("https://public.sepolia.rpc.status.network"),
+      });
+
+      const election = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getElection",
+        args: [BigInt(vote2cConfig.electionId)],
+      });
+
+      const status = election.status === 1 ? "Open" : "Closed";
+      setElectionStatus2c(status);
+      
+      if (autoCollapseOnLoad && status !== "Open") {
+        setVote2cCollapsed(true);
+      }
+    } catch (error) {
+      console.error("Error fetching status for vote 2c:", error);
+      if (autoCollapseOnLoad) {
+        setVote2cCollapsed(true);
+      }
+    }
+  };
+
+  // Function to fetch election status for Vote 2d (private)
+  const fetchElectionStatus2d = async (autoCollapseOnLoad = false) => {
+    if (!vote2dConfig) return;
+    
+    try {
+      const publicClient = createPublicClient({
+        chain: statusNetworkSepolia,
+        transport: http("https://public.sepolia.rpc.status.network"),
+      });
+
+      const election = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getElection",
+        args: [BigInt(vote2dConfig.electionId)],
+      });
+
+      const status = election.status === 1 ? "Open" : "Closed";
+      setElectionStatus2d(status);
+      
+      if (autoCollapseOnLoad && status !== "Open") {
+        setVote2dCollapsed(true);
+      }
+    } catch (error) {
+      console.error("Error fetching status for vote 2d:", error);
+      if (autoCollapseOnLoad) {
+        setVote2dCollapsed(true);
       }
     }
   };
@@ -364,6 +617,10 @@ export default function VotingBooth() {
           setAssignedDistrict1a(district1a);
           setAssignedDistrict1b(district1b);
           
+          // Assign committee for votes 2a-2d (same committee for all)
+          const committee = getAssignedCommittee(walletAddress);
+          setAssignedCommittee(committee);
+          
           // Mark Task 1 as complete (assume user has seen their ID after registration)
           setTask1Complete(true);
           setTask1Collapsed(true);
@@ -450,6 +707,80 @@ export default function VotingBooth() {
             await fetchElectionStatus1b(true);
           }
           
+          // Check if user has voted in vote 2a (public)
+          if (vote2aConfig) {
+            const voted2a = await publicClient.readContract({
+              address: VOTING_CONTRACT_ADDRESS,
+              abi: VOTING_WORKSHOP_ABI,
+              functionName: "hasUserVoted",
+              args: [BigInt(vote2aConfig.electionId), walletAddress as `0x${string}`],
+            });
+            
+            setHasVoted2a(voted2a);
+            
+            if (voted2a) {
+              const choice = await publicClient.readContract({
+                address: VOTING_CONTRACT_ADDRESS,
+                abi: publicVotesABI,
+                functionName: "publicVotes",
+                args: [BigInt(vote2aConfig.electionId), id],
+              });
+              setUserVote2a(Number(choice));
+            }
+            
+            await fetchElectionResults2a(true);
+          }
+          
+          // Check if user has voted in vote 2b (public)
+          if (vote2bConfig) {
+            const voted2b = await publicClient.readContract({
+              address: VOTING_CONTRACT_ADDRESS,
+              abi: VOTING_WORKSHOP_ABI,
+              functionName: "hasUserVoted",
+              args: [BigInt(vote2bConfig.electionId), walletAddress as `0x${string}`],
+            });
+            
+            setHasVoted2b(voted2b);
+            
+            if (voted2b) {
+              const choice = await publicClient.readContract({
+                address: VOTING_CONTRACT_ADDRESS,
+                abi: publicVotesABI,
+                functionName: "publicVotes",
+                args: [BigInt(vote2bConfig.electionId), id],
+              });
+              setUserVote2b(Number(choice));
+            }
+            
+            await fetchElectionResults2b(true);
+          }
+          
+          // Check if user has voted in vote 2c (private)
+          if (vote2cConfig) {
+            const voted2c = await publicClient.readContract({
+              address: VOTING_CONTRACT_ADDRESS,
+              abi: VOTING_WORKSHOP_ABI,
+              functionName: "hasUserVoted",
+              args: [BigInt(vote2cConfig.electionId), walletAddress as `0x${string}`],
+            });
+            
+            setHasVoted2c(voted2c);
+            await fetchElectionStatus2c(true);
+          }
+          
+          // Check if user has voted in vote 2d (private)
+          if (vote2dConfig) {
+            const voted2d = await publicClient.readContract({
+              address: VOTING_CONTRACT_ADDRESS,
+              abi: VOTING_WORKSHOP_ABI,
+              functionName: "hasUserVoted",
+              args: [BigInt(vote2dConfig.electionId), walletAddress as `0x${string}`],
+            });
+            
+            setHasVoted2d(voted2d);
+            await fetchElectionStatus2d(true);
+          }
+          
           setLoading(false);
         }
       } catch (error) {
@@ -460,7 +791,7 @@ export default function VotingBooth() {
 
     checkRegistrationAndVotes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, authenticated, user, router, vote0Config, vote1aConfig, vote1bConfig]);
+  }, [ready, authenticated, user, router, vote0Config, vote1aConfig, vote1bConfig, vote2aConfig, vote2bConfig, vote2cConfig, vote2dConfig]);
 
   // Auto-refresh results for Vote 0 every 5 seconds (only when Open)
   useEffect(() => {
@@ -498,6 +829,54 @@ export default function VotingBooth() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vote1bConfig, task1Complete, hasVoted1a, electionStatus1b]);
 
+  // Auto-refresh results for Vote 2a every 5 seconds (only when Open)
+  useEffect(() => {
+    if (!vote2aConfig || !task1Complete || !hasVoted1b || electionStatus2a !== "Open") return;
+
+    const intervalId = setInterval(() => {
+      fetchElectionResults2a();
+    }, 5000);
+
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vote2aConfig, task1Complete, hasVoted1b, electionStatus2a]);
+
+  // Auto-refresh results for Vote 2b every 5 seconds (only when Open)
+  useEffect(() => {
+    if (!vote2bConfig || !task1Complete || !hasVoted2a || electionStatus2b !== "Open") return;
+
+    const intervalId = setInterval(() => {
+      fetchElectionResults2b();
+    }, 5000);
+
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vote2bConfig, task1Complete, hasVoted2a, electionStatus2b]);
+
+  // Check if Vote 2c election closed (stop checking once closed)
+  useEffect(() => {
+    if (!vote2cConfig || !task1Complete || !hasVoted2b || electionStatus2c === "Closed") return;
+
+    const intervalId = setInterval(() => {
+      fetchElectionStatus2c();
+    }, 5000);
+
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vote2cConfig, task1Complete, hasVoted2b, electionStatus2c]);
+
+  // Check if Vote 2d election closed (stop checking once closed)
+  useEffect(() => {
+    if (!vote2dConfig || !task1Complete || !hasVoted2c || electionStatus2d === "Closed") return;
+
+    const intervalId = setInterval(() => {
+      fetchElectionStatus2d();
+    }, 5000);
+
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vote2dConfig, task1Complete, hasVoted2c, electionStatus2d]);
+
   const handleRefreshResults0 = async () => {
     setIsRefreshingResults0(true);
     await fetchElectionResults0();
@@ -508,6 +887,18 @@ export default function VotingBooth() {
     setIsRefreshingResults1a(true);
     await fetchElectionResults1a();
     setTimeout(() => setIsRefreshingResults1a(false), 300);
+  };
+
+  const handleRefreshResults2a = async () => {
+    setIsRefreshingResults2a(true);
+    await fetchElectionResults2a();
+    setTimeout(() => setIsRefreshingResults2a(false), 300);
+  };
+
+  const handleRefreshResults2b = async () => {
+    setIsRefreshingResults2b(true);
+    await fetchElectionResults2b();
+    setTimeout(() => setIsRefreshingResults2b(false), 300);
   };
 
   const handleVoteSubmit0 = async () => {
@@ -593,6 +984,100 @@ export default function VotingBooth() {
     }
   };
 
+  const handleVoteSubmit2a = async () => {
+    if (selectedOption2a === null || !vote2aConfig) {
+      showErrorToast("Please select an option");
+      return;
+    }
+
+    setIsSubmitting2a(true);
+
+    try {
+      const data = encodeFunctionData({
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "castPublicVote",
+        args: [BigInt(vote2aConfig.electionId), BigInt(selectedOption2a)],
+      });
+
+      await sendTransaction({
+        to: VOTING_CONTRACT_ADDRESS,
+        data: data,
+        value: BigInt(0),
+      });
+
+      showSuccessToast("Vote submitted successfully!");
+      setHasVoted2a(true);
+      setUserVote2a(selectedOption2a);
+      
+      setTimeout(() => fetchElectionResults2a(), 1500);
+    } catch (error: any) {
+      console.error("Vote submission error:", error);
+      showErrorToast(error?.message || "Failed to submit vote. Please try again.");
+    } finally {
+      setIsSubmitting2a(false);
+    }
+  };
+
+  const handleVoteSubmit2b = async () => {
+    if (selectedOption2b === null || !vote2bConfig) {
+      showErrorToast("Please select an option");
+      return;
+    }
+
+    setIsSubmitting2b(true);
+
+    try {
+      const data = encodeFunctionData({
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "castPublicVote",
+        args: [BigInt(vote2bConfig.electionId), BigInt(selectedOption2b)],
+      });
+
+      await sendTransaction({
+        to: VOTING_CONTRACT_ADDRESS,
+        data: data,
+        value: BigInt(0),
+      });
+
+      showSuccessToast("Vote submitted successfully!");
+      setHasVoted2b(true);
+      setUserVote2b(selectedOption2b);
+      
+      setTimeout(() => fetchElectionResults2b(), 1500);
+    } catch (error: any) {
+      console.error("Vote submission error:", error);
+      showErrorToast(error?.message || "Failed to submit vote. Please try again.");
+    } finally {
+      setIsSubmitting2b(false);
+    }
+  };
+
+  const handleVoteSubmit2c = async () => {
+    if (selectedOption2c === null) {
+      showErrorToast("Please select an option");
+      return;
+    }
+
+    try {
+      await submitVote2c(selectedOption2c);
+    } catch (error: any) {
+      console.error("Private vote submission error:", error);
+    }
+  };
+
+  const handleVoteSubmit2d = async () => {
+    if (selectedOption2d === null) {
+      showErrorToast("Please select an option");
+      return;
+    }
+
+    try {
+      await submitVote2d(selectedOption2d);
+    } catch (error: any) {
+      console.error("Private vote submission error:", error);
+    }
+  };
+
   if (!ready || loading) {
     return <FullScreenLoader />;
   }
@@ -602,7 +1087,7 @@ export default function VotingBooth() {
     return <FullScreenLoader />;
   }
 
-  if (isSubmitting0 || isSubmitting1a || isSubmitting1b) {
+  if (isSubmitting0 || isSubmitting1a || isSubmitting1b || isSubmitting2a || isSubmitting2b || isSubmitting2c || isSubmitting2d) {
     return <FullScreenLoader message="Submitting your vote..." />;
   }
 
@@ -1299,7 +1784,7 @@ export default function VotingBooth() {
                       <span>Private Voting - Your vote is encrypted and secret</span>
                     </p>
                     <p className="text-xs text-purple-700 text-center mt-1">
-                      Results will be revealed by the organizer after voting closes
+                      The organizer will present the results after voting closes
                     </p>
                   </div>
 
@@ -1380,7 +1865,7 @@ export default function VotingBooth() {
                         <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
                           <p className="text-xs text-blue-800">
                             <strong>How it works:</strong> You&apos;ll be asked to sign a message with your wallet. 
-                            This signature will be encrypted and submitted to the blockchain. No one can see your vote until the organizer decrypts and tallies after voting closes.
+                            This signature will be encrypted and submitted to the blockchain. Only the organizer can decrypt and tally the votes to present the final results. Individual votes remain secret.
                           </p>
                         </div>
                       </>
@@ -1393,13 +1878,881 @@ export default function VotingBooth() {
                           ✓ Your encrypted vote has been recorded on the blockchain
                         </p>
                         <p className="text-xs text-green-700 text-center mt-1">
-                          Results will be revealed by the organizer after voting closes
+                          The organizer will present the results after voting closes
                         </p>
                       </div>
                     )}
 
                     {/* Show status when voting is closed */}
                     {electionStatus1b === "Closed" && (
+                      <div className="border-t-2 border-gray-200 pt-6 mt-6">
+                        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                          <p className="text-sm text-blue-800 font-medium text-center">
+                            🔐 Voting is closed. The organizer will present the results.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Task 5: Vote 2a - Reciprocity Round 1 (Public) */}
+          {vote2aConfig && (
+            <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
+              hasVoted1b ? "border-gray-200" : "border-gray-100 opacity-50"
+            }`}>
+              <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
+                {hasVoted2a ? (
+                  <CheckCircleIcon className="w-7 h-7 text-green-600" />
+                ) : (
+                  <div className="w-7 h-7 rounded-full border-2 border-gray-400 flex items-center justify-center bg-white">
+                    <span className="text-sm font-bold text-gray-600">5</span>
+                  </div>
+                )}
+                <div className="flex-1">
+                  <h2 className="text-xl font-bold text-gray-900">
+                    {vote2aConfig.title}
+                  </h2>
+                  {!hasVoted1b && (
+                    <p className="text-sm text-gray-500">Complete previous task to unlock</p>
+                  )}
+                  {hasVoted2a && electionStatus2a === "Open" && (
+                    <p className="text-sm text-green-600 font-medium">Voted</p>
+                  )}
+                  {electionStatus2a === "Closed" && (
+                    <p className="text-sm text-blue-600 font-medium">Closed</p>
+                  )}
+                  {electionStatus2a === null && hasVoted1b && (
+                    <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
+                  )}
+                </div>
+                {hasVoted1b && (
+                  <button
+                    onClick={() => setVote2aCollapsed(!vote2aCollapsed)}
+                    className="text-sm text-gray-500 hover:text-gray-700 underline"
+                  >
+                    {vote2aCollapsed ? "Expand" : "Collapse"}
+                  </button>
+                )}
+              </div>
+
+              {hasVoted1b && !vote2aCollapsed && (
+                <div className="p-8 space-y-6">
+                  {/* Committee Assignment Banner */}
+                  {assignedCommittee && (
+                    <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                      <p className="text-sm font-semibold text-blue-900 text-center">
+                        👥 Your Committee: <span className="text-lg font-bold">{assignedCommittee}</span>
+                      </p>
+                      <p className="text-xs text-blue-700 text-center mt-1">
+                        Initiative {assignedCommittee === "Marketing" ? "A" : assignedCommittee === "Operations" ? "B" : "C"} best serves your committee
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-base text-gray-700 mb-3 leading-relaxed whitespace-pre-line">
+                        {vote2aConfig.context}
+                      </p>
+                      <p className="text-lg font-bold text-gray-900 mt-4">
+                        {vote2aConfig.question}
+                      </p>
+                    </div>
+
+                    {electionStatus2a === null && (
+                      <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-6 text-center">
+                        <p className="text-lg font-semibold text-amber-900 mb-2">
+                          ⏳ Waiting for Vote to Open
+                        </p>
+                        <p className="text-sm text-amber-700">
+                          The organizer will open this vote when ready. Please wait.
+                        </p>
+                      </div>
+                    )}
+
+                    {!hasVoted2a && electionStatus2a === "Open" && (
+                      <>
+                        <div className="pt-2">
+                          <p className="text-sm font-semibold text-gray-700 mb-3">Cast Your Vote:</p>
+                          <div className="space-y-3">
+                            {vote2aConfig.options.map((option) => {
+                              const isCommitteeInitiative = (
+                                (assignedCommittee === "Marketing" && option.text.includes("(Marketing)")) ||
+                                (assignedCommittee === "Operations" && option.text.includes("(Operations)")) ||
+                                (assignedCommittee === "Community" && option.text.includes("(Community)"))
+                              );
+                              return (
+                                <button
+                                  key={option.id}
+                                  onClick={() => setSelectedOption2a(option.id)}
+                                  className={`w-full text-left px-6 py-4 border-2 rounded-xl transition-all duration-200 font-medium ${
+                                    selectedOption2a === option.id
+                                      ? "border-gray-900 bg-gray-900 text-white"
+                                      : isCommitteeInitiative
+                                      ? "border-blue-300 bg-blue-50 text-gray-900 hover:border-blue-400"
+                                      : "border-gray-200 bg-gray-50 text-gray-900 hover:border-gray-400 hover:bg-white"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span>{option.text}</span>
+                                    {isCommitteeInitiative && selectedOption2a !== option.id && (
+                                      <span className="text-xs text-blue-600 font-semibold">👥 Your Committee</span>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={handleVoteSubmit2a}
+                          disabled={selectedOption2a === null || isSubmitting2a}
+                          className="w-full bg-gray-900 text-white px-8 py-4 rounded-xl text-lg font-semibold transition-all duration-300 hover:bg-gray-800 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSubmitting2a ? "Submitting..." : "Submit Vote"}
+                        </button>
+                      </>
+                    )}
+
+                    {hasVoted2a && (
+                      <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+                        <p className="text-sm font-semibold text-green-800">
+                          ✓ You voted for: <span className="font-bold">{vote2aConfig.options.find(o => o.id === userVote2a)?.text}</span>
+                        </p>
+                      </div>
+                    )}
+
+                    {electionStatus2a !== null && (
+                      <div className="border-t-2 border-gray-200 pt-6 mt-6">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <h3 className="text-lg font-bold text-gray-900">
+                              {electionStatus2a === "Closed" ? "Final Results" : "Live Results"}
+                            </h3>
+                            <p className="text-sm text-gray-600">
+                              {totalVotes2a} {totalVotes2a === 1 ? "vote" : "votes"} cast
+                              {electionStatus2a === "Closed" && " • Voting closed"}
+                            </p>
+                          </div>
+                          <button
+                            onClick={handleRefreshResults2a}
+                            disabled={isRefreshingResults2a}
+                            className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 border-2 border-gray-300 rounded-lg text-sm font-medium text-gray-700 transition-all disabled:opacity-50"
+                          >
+                            <svg 
+                              className={`w-4 h-4 ${isRefreshingResults2a ? 'animate-spin' : ''}`} 
+                              fill="none" 
+                              stroke="currentColor" 
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            Refresh
+                          </button>
+                        </div>
+
+                        {electionStatus2a === "Closed" && (
+                          <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 mb-4">
+                            <p className="text-sm text-blue-800 font-medium text-center">
+                              🏁 These results are final
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="space-y-3">
+                          {vote2aConfig.options.map((option, index) => {
+                            const voteCount = voteCounts2a[index] || 0;
+                            const percentage = totalVotes2a > 0 ? (voteCount / totalVotes2a) * 100 : 0;
+                            const isWinner = electionStatus2a === "Closed" && voteCount > 0 && voteCount === Math.max(...voteCounts2a);
+                            const isUserChoice = hasVoted2a && option.id === userVote2a;
+                            const voters = votersByChoice2a[option.id] || [];
+
+                            return (
+                              <div
+                                key={option.id}
+                                className={`rounded-xl border-2 transition-all overflow-hidden ${
+                                  isWinner
+                                    ? "border-green-400 bg-green-50"
+                                    : isUserChoice
+                                    ? "border-blue-300 bg-blue-50"
+                                    : "border-gray-200 bg-white"
+                                }`}
+                              >
+                                <div className="relative overflow-hidden">
+                                  <div 
+                                    className={`absolute inset-0 transition-all duration-500 ${
+                                      isWinner
+                                        ? "bg-green-100"
+                                        : isUserChoice
+                                        ? "bg-blue-100"
+                                        : "bg-gray-100"
+                                    }`}
+                                    style={{ width: `${percentage}%` }}
+                                  />
+                                  
+                                  <div className="relative px-4 py-3 flex items-center justify-between">
+                                    <div className="flex-1 pr-4">
+                                      <div className="flex items-center gap-2">
+                                        {isWinner && <span className="text-lg">🏆</span>}
+                                        {isUserChoice && !isWinner && (
+                                          <span className="text-blue-600 font-bold">→</span>
+                                        )}
+                                        <p className={`font-medium ${
+                                          isWinner ? "text-green-900 font-bold" : "text-gray-900"
+                                        }`}>
+                                          {option.text}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                      <div className="text-right">
+                                        <p className={`text-2xl font-bold ${
+                                          isWinner ? "text-green-700" : "text-gray-900"
+                                        }`}>
+                                          {percentage.toFixed(1)}%
+                                        </p>
+                                        <p className="text-xs text-gray-600">
+                                          {voteCount} {voteCount === 1 ? "vote" : "votes"}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                {voters.length > 0 && (
+                                  <div className={`px-4 py-2 border-t ${
+                                    isWinner
+                                      ? "border-green-200 bg-green-50"
+                                      : isUserChoice
+                                      ? "border-blue-200 bg-blue-50"
+                                      : "border-gray-200 bg-gray-50"
+                                  }`}>
+                                    <p className="text-xs text-gray-600 mb-1">Voters:</p>
+                                    <div className="flex flex-wrap gap-1">
+                                      {voters.map((voterId) => (
+                                        <span
+                                          key={voterId}
+                                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                            voterId === Number(userId)
+                                              ? "bg-blue-200 text-blue-800"
+                                              : "bg-gray-200 text-gray-700"
+                                          }`}
+                                        >
+                                          #{voterId}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Task 6: Vote 2b - Reciprocity Round 2 (Public) */}
+          {vote2bConfig && (
+            <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
+              hasVoted2a ? "border-gray-200" : "border-gray-100 opacity-50"
+            }`}>
+              <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
+                {hasVoted2b ? (
+                  <CheckCircleIcon className="w-7 h-7 text-green-600" />
+                ) : (
+                  <div className="w-7 h-7 rounded-full border-2 border-gray-400 flex items-center justify-center bg-white">
+                    <span className="text-sm font-bold text-gray-600">6</span>
+                  </div>
+                )}
+                <div className="flex-1">
+                  <h2 className="text-xl font-bold text-gray-900">
+                    {vote2bConfig.title}
+                  </h2>
+                  {!hasVoted2a && (
+                    <p className="text-sm text-gray-500">Complete previous task to unlock</p>
+                  )}
+                  {hasVoted2b && electionStatus2b === "Open" && (
+                    <p className="text-sm text-green-600 font-medium">Voted</p>
+                  )}
+                  {electionStatus2b === "Closed" && (
+                    <p className="text-sm text-blue-600 font-medium">Closed</p>
+                  )}
+                  {electionStatus2b === null && hasVoted2a && (
+                    <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
+                  )}
+                </div>
+                {hasVoted2a && (
+                  <button
+                    onClick={() => setVote2bCollapsed(!vote2bCollapsed)}
+                    className="text-sm text-gray-500 hover:text-gray-700 underline"
+                  >
+                    {vote2bCollapsed ? "Expand" : "Collapse"}
+                  </button>
+                )}
+              </div>
+
+              {hasVoted2a && !vote2bCollapsed && (
+                <div className="p-8 space-y-6">
+                  {/* Committee Assignment Banner */}
+                  {assignedCommittee && (
+                    <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                      <p className="text-sm font-semibold text-blue-900 text-center">
+                        👥 Your Committee: <span className="text-lg font-bold">{assignedCommittee}</span>
+                      </p>
+                      <p className="text-xs text-blue-700 text-center mt-1">
+                        Initiative {assignedCommittee === "Marketing" ? "A" : assignedCommittee === "Operations" ? "B" : "C"} best serves your committee
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-base text-gray-700 mb-3 leading-relaxed whitespace-pre-line">
+                        {vote2bConfig.context}
+                      </p>
+                      <p className="text-lg font-bold text-gray-900 mt-4">
+                        {vote2bConfig.question}
+                      </p>
+                    </div>
+
+                    {electionStatus2b === null && (
+                      <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-6 text-center">
+                        <p className="text-lg font-semibold text-amber-900 mb-2">
+                          ⏳ Waiting for Vote to Open
+                        </p>
+                        <p className="text-sm text-amber-700">
+                          The organizer will open this vote when ready. Please wait.
+                        </p>
+                      </div>
+                    )}
+
+                    {!hasVoted2b && electionStatus2b === "Open" && (
+                      <>
+                        <div className="pt-2">
+                          <p className="text-sm font-semibold text-gray-700 mb-3">Cast Your Vote:</p>
+                          <div className="space-y-3">
+                            {vote2bConfig.options.map((option) => {
+                              const isCommitteeInitiative = (
+                                (assignedCommittee === "Marketing" && option.text.includes("(Marketing)")) ||
+                                (assignedCommittee === "Operations" && option.text.includes("(Operations)")) ||
+                                (assignedCommittee === "Community" && option.text.includes("(Community)"))
+                              );
+                              return (
+                                <button
+                                  key={option.id}
+                                  onClick={() => setSelectedOption2b(option.id)}
+                                  className={`w-full text-left px-6 py-4 border-2 rounded-xl transition-all duration-200 font-medium ${
+                                    selectedOption2b === option.id
+                                      ? "border-gray-900 bg-gray-900 text-white"
+                                      : isCommitteeInitiative
+                                      ? "border-blue-300 bg-blue-50 text-gray-900 hover:border-blue-400"
+                                      : "border-gray-200 bg-gray-50 text-gray-900 hover:border-gray-400 hover:bg-white"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span>{option.text}</span>
+                                    {isCommitteeInitiative && selectedOption2b !== option.id && (
+                                      <span className="text-xs text-blue-600 font-semibold">👥 Your Committee</span>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={handleVoteSubmit2b}
+                          disabled={selectedOption2b === null || isSubmitting2b}
+                          className="w-full bg-gray-900 text-white px-8 py-4 rounded-xl text-lg font-semibold transition-all duration-300 hover:bg-gray-800 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSubmitting2b ? "Submitting..." : "Submit Vote"}
+                        </button>
+                      </>
+                    )}
+
+                    {hasVoted2b && (
+                      <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+                        <p className="text-sm font-semibold text-green-800">
+                          ✓ You voted for: <span className="font-bold">{vote2bConfig.options.find(o => o.id === userVote2b)?.text}</span>
+                        </p>
+                      </div>
+                    )}
+
+                    {electionStatus2b !== null && (
+                      <div className="border-t-2 border-gray-200 pt-6 mt-6">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <h3 className="text-lg font-bold text-gray-900">
+                              {electionStatus2b === "Closed" ? "Final Results" : "Live Results"}
+                            </h3>
+                            <p className="text-sm text-gray-600">
+                              {totalVotes2b} {totalVotes2b === 1 ? "vote" : "votes"} cast
+                              {electionStatus2b === "Closed" && " • Voting closed"}
+                            </p>
+                          </div>
+                          <button
+                            onClick={handleRefreshResults2b}
+                            disabled={isRefreshingResults2b}
+                            className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 border-2 border-gray-300 rounded-lg text-sm font-medium text-gray-700 transition-all disabled:opacity-50"
+                          >
+                            <svg 
+                              className={`w-4 h-4 ${isRefreshingResults2b ? 'animate-spin' : ''}`} 
+                              fill="none" 
+                              stroke="currentColor" 
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            Refresh
+                          </button>
+                        </div>
+
+                        {electionStatus2b === "Closed" && (
+                          <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 mb-4">
+                            <p className="text-sm text-blue-800 font-medium text-center">
+                              🏁 These results are final
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="space-y-3">
+                          {vote2bConfig.options.map((option, index) => {
+                            const voteCount = voteCounts2b[index] || 0;
+                            const percentage = totalVotes2b > 0 ? (voteCount / totalVotes2b) * 100 : 0;
+                            const isWinner = electionStatus2b === "Closed" && voteCount > 0 && voteCount === Math.max(...voteCounts2b);
+                            const isUserChoice = hasVoted2b && option.id === userVote2b;
+                            const voters = votersByChoice2b[option.id] || [];
+
+                            return (
+                              <div
+                                key={option.id}
+                                className={`rounded-xl border-2 transition-all overflow-hidden ${
+                                  isWinner
+                                    ? "border-green-400 bg-green-50"
+                                    : isUserChoice
+                                    ? "border-blue-300 bg-blue-50"
+                                    : "border-gray-200 bg-white"
+                                }`}
+                              >
+                                <div className="relative overflow-hidden">
+                                  <div 
+                                    className={`absolute inset-0 transition-all duration-500 ${
+                                      isWinner
+                                        ? "bg-green-100"
+                                        : isUserChoice
+                                        ? "bg-blue-100"
+                                        : "bg-gray-100"
+                                    }`}
+                                    style={{ width: `${percentage}%` }}
+                                  />
+                                  
+                                  <div className="relative px-4 py-3 flex items-center justify-between">
+                                    <div className="flex-1 pr-4">
+                                      <div className="flex items-center gap-2">
+                                        {isWinner && <span className="text-lg">🏆</span>}
+                                        {isUserChoice && !isWinner && (
+                                          <span className="text-blue-600 font-bold">→</span>
+                                        )}
+                                        <p className={`font-medium ${
+                                          isWinner ? "text-green-900 font-bold" : "text-gray-900"
+                                        }`}>
+                                          {option.text}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                      <div className="text-right">
+                                        <p className={`text-2xl font-bold ${
+                                          isWinner ? "text-green-700" : "text-gray-900"
+                                        }`}>
+                                          {percentage.toFixed(1)}%
+                                        </p>
+                                        <p className="text-xs text-gray-600">
+                                          {voteCount} {voteCount === 1 ? "vote" : "votes"}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                {voters.length > 0 && (
+                                  <div className={`px-4 py-2 border-t ${
+                                    isWinner
+                                      ? "border-green-200 bg-green-50"
+                                      : isUserChoice
+                                      ? "border-blue-200 bg-blue-50"
+                                      : "border-gray-200 bg-gray-50"
+                                  }`}>
+                                    <p className="text-xs text-gray-600 mb-1">Voters:</p>
+                                    <div className="flex flex-wrap gap-1">
+                                      {voters.map((voterId) => (
+                                        <span
+                                          key={voterId}
+                                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                            voterId === Number(userId)
+                                              ? "bg-blue-200 text-blue-800"
+                                              : "bg-gray-200 text-gray-700"
+                                          }`}
+                                        >
+                                          #{voterId}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Task 7: Vote 2c - Reciprocity Round 3 (Private) */}
+          {vote2cConfig && (
+            <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
+              hasVoted2b ? "border-gray-200" : "border-gray-100 opacity-50"
+            }`}>
+              <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
+                {hasVoted2c ? (
+                  <CheckCircleIcon className="w-7 h-7 text-green-600" />
+                ) : (
+                  <div className="w-7 h-7 rounded-full border-2 border-gray-400 flex items-center justify-center bg-white">
+                    <span className="text-sm font-bold text-gray-600">7</span>
+                  </div>
+                )}
+                <div className="flex-1">
+                  <h2 className="text-xl font-bold text-gray-900">
+                    {vote2cConfig.title}
+                  </h2>
+                  {!hasVoted2b && (
+                    <p className="text-sm text-gray-500">Complete previous task to unlock</p>
+                  )}
+                  {hasVoted2c && electionStatus2c === "Open" && (
+                    <p className="text-sm text-green-600 font-medium">Voted</p>
+                  )}
+                  {electionStatus2c === "Closed" && (
+                    <p className="text-sm text-blue-600 font-medium">Closed</p>
+                  )}
+                  {electionStatus2c === null && hasVoted2b && (
+                    <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
+                  )}
+                </div>
+                {hasVoted2b && (
+                  <button
+                    onClick={() => setVote2cCollapsed(!vote2cCollapsed)}
+                    className="text-sm text-gray-500 hover:text-gray-700 underline"
+                  >
+                    {vote2cCollapsed ? "Expand" : "Collapse"}
+                  </button>
+                )}
+              </div>
+
+              {hasVoted2b && !vote2cCollapsed && (
+                <div className="p-8 space-y-6">
+                  {/* Private Voting Badge */}
+                  <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
+                    <p className="text-sm font-semibold text-purple-900 text-center flex items-center justify-center gap-2">
+                      <span>🔒</span>
+                      <span>Private Voting - Your vote is encrypted and secret</span>
+                    </p>
+                    <p className="text-xs text-purple-700 text-center mt-1">
+                      The organizer will present the results after voting closes
+                    </p>
+                  </div>
+
+                  {/* Committee Assignment Banner */}
+                  {assignedCommittee && (
+                    <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                      <p className="text-sm font-semibold text-blue-900 text-center">
+                        👥 Your Committee: <span className="text-lg font-bold">{assignedCommittee}</span>
+                      </p>
+                      <p className="text-xs text-blue-700 text-center mt-1">
+                        Initiative {assignedCommittee === "Marketing" ? "A" : assignedCommittee === "Operations" ? "B" : "C"} best serves your committee
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-base text-gray-700 mb-3 leading-relaxed whitespace-pre-line">
+                        {vote2cConfig.context}
+                      </p>
+                      <p className="text-lg font-bold text-gray-900 mt-4">
+                        {vote2cConfig.question}
+                      </p>
+                    </div>
+
+                    {electionStatus2c === null && (
+                      <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-6 text-center">
+                        <p className="text-lg font-semibold text-amber-900 mb-2">
+                          ⏳ Waiting for Vote to Open
+                        </p>
+                        <p className="text-sm text-amber-700">
+                          The organizer will open this vote when ready. Please wait.
+                        </p>
+                      </div>
+                    )}
+
+                    {!hasVoted2c && electionStatus2c === "Open" && (
+                      <>
+                        <div className="pt-2">
+                          <p className="text-sm font-semibold text-gray-700 mb-3">Cast Your Private Vote:</p>
+                          <div className="space-y-3">
+                            {vote2cConfig.options.map((option) => {
+                              const isCommitteeInitiative = (
+                                (assignedCommittee === "Marketing" && option.text.includes("(Marketing)")) ||
+                                (assignedCommittee === "Operations" && option.text.includes("(Operations)")) ||
+                                (assignedCommittee === "Community" && option.text.includes("(Community)"))
+                              );
+                              return (
+                                <button
+                                  key={option.id}
+                                  onClick={() => setSelectedOption2c(option.id)}
+                                  className={`w-full text-left px-6 py-4 border-2 rounded-xl transition-all duration-200 font-medium ${
+                                    selectedOption2c === option.id
+                                      ? "border-gray-900 bg-gray-900 text-white"
+                                      : isCommitteeInitiative
+                                      ? "border-blue-300 bg-blue-50 text-gray-900 hover:border-blue-400"
+                                      : "border-gray-200 bg-gray-50 text-gray-900 hover:border-gray-400 hover:bg-white"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span>{option.text}</span>
+                                    {isCommitteeInitiative && selectedOption2c !== option.id && (
+                                      <span className="text-xs text-blue-600 font-semibold">👥 Your Committee</span>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={handleVoteSubmit2c}
+                          disabled={selectedOption2c === null || isSubmitting2c}
+                          className="w-full bg-gray-900 text-white px-8 py-4 rounded-xl text-lg font-semibold transition-all duration-300 hover:bg-gray-800 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSubmitting2c ? "Encrypting and submitting..." : "Submit Private Vote"}
+                        </button>
+
+                        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                          <p className="text-xs text-blue-800">
+                            <strong>How it works:</strong> You&apos;ll be asked to sign a message with your wallet. 
+                            This signature will be encrypted and submitted to the blockchain. Only the organizer can decrypt and tally the votes to present the final results. Individual votes remain secret.
+                          </p>
+                        </div>
+                      </>
+                    )}
+
+                    {hasVoted2c && (
+                      <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+                        <p className="text-sm font-semibold text-green-800 text-center">
+                          ✓ Your encrypted vote has been recorded on the blockchain
+                        </p>
+                        <p className="text-xs text-green-700 text-center mt-1">
+                          The organizer will present the results after voting closes
+                        </p>
+                      </div>
+                    )}
+
+                    {electionStatus2c === "Closed" && (
+                      <div className="border-t-2 border-gray-200 pt-6 mt-6">
+                        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                          <p className="text-sm text-blue-800 font-medium text-center">
+                            🔐 Voting is closed. The organizer will present the results.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Task 8: Vote 2d - Reciprocity Round 4 (Private with Bonus) */}
+          {vote2dConfig && (
+            <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
+              hasVoted2c ? "border-gray-200" : "border-gray-100 opacity-50"
+            }`}>
+              <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
+                {hasVoted2d ? (
+                  <CheckCircleIcon className="w-7 h-7 text-green-600" />
+                ) : (
+                  <div className="w-7 h-7 rounded-full border-2 border-gray-400 flex items-center justify-center bg-white">
+                    <span className="text-sm font-bold text-gray-600">8</span>
+                  </div>
+                )}
+                <div className="flex-1">
+                  <h2 className="text-xl font-bold text-gray-900">
+                    {vote2dConfig.title}
+                  </h2>
+                  {!hasVoted2c && (
+                    <p className="text-sm text-gray-500">Complete previous task to unlock</p>
+                  )}
+                  {hasVoted2d && electionStatus2d === "Open" && (
+                    <p className="text-sm text-green-600 font-medium">Voted</p>
+                  )}
+                  {electionStatus2d === "Closed" && (
+                    <p className="text-sm text-blue-600 font-medium">Closed</p>
+                  )}
+                  {electionStatus2d === null && hasVoted2c && (
+                    <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
+                  )}
+                </div>
+                {hasVoted2c && (
+                  <button
+                    onClick={() => setVote2dCollapsed(!vote2dCollapsed)}
+                    className="text-sm text-gray-500 hover:text-gray-700 underline"
+                  >
+                    {vote2dCollapsed ? "Expand" : "Collapse"}
+                  </button>
+                )}
+              </div>
+
+              {hasVoted2c && !vote2dCollapsed && (
+                <div className="p-8 space-y-6">
+                  {/* Bonus Banner */}
+                  <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-6">
+                    <p className="text-lg font-bold text-amber-900 text-center mb-2">
+                      🎁 BONUS OPPORTUNITY
+                    </p>
+                    <p className="text-sm text-amber-800 text-center">
+                      If D (Shared Hub) reaches 50% or more votes, everyone who voted D earns a bonus!
+                    </p>
+                  </div>
+
+                  {/* Private Voting Badge */}
+                  <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
+                    <p className="text-sm font-semibold text-purple-900 text-center flex items-center justify-center gap-2">
+                      <span>🔒</span>
+                      <span>Private Voting - Your vote is encrypted and secret</span>
+                    </p>
+                    <p className="text-xs text-purple-700 text-center mt-1">
+                      The organizer will present the results after voting closes
+                    </p>
+                  </div>
+
+                  {/* Committee Assignment Banner */}
+                  {assignedCommittee && (
+                    <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                      <p className="text-sm font-semibold text-blue-900 text-center">
+                        👥 Your Committee: <span className="text-lg font-bold">{assignedCommittee}</span>
+                      </p>
+                      <p className="text-xs text-blue-700 text-center mt-1">
+                        Initiative {assignedCommittee === "Marketing" ? "A" : assignedCommittee === "Operations" ? "B" : "C"} best serves your committee
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-base text-gray-700 mb-3 leading-relaxed whitespace-pre-line">
+                        {vote2dConfig.context}
+                      </p>
+                      <p className="text-lg font-bold text-gray-900 mt-4">
+                        {vote2dConfig.question}
+                      </p>
+                    </div>
+
+                    {electionStatus2d === null && (
+                      <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-6 text-center">
+                        <p className="text-lg font-semibold text-amber-900 mb-2">
+                          ⏳ Waiting for Vote to Open
+                        </p>
+                        <p className="text-sm text-amber-700">
+                          The organizer will open this vote when ready. Please wait.
+                        </p>
+                      </div>
+                    )}
+
+                    {!hasVoted2d && electionStatus2d === "Open" && (
+                      <>
+                        <div className="pt-2">
+                          <p className="text-sm font-semibold text-gray-700 mb-3">Cast Your Private Vote:</p>
+                          <div className="space-y-3">
+                            {vote2dConfig.options.map((option) => {
+                              const isCommitteeInitiative = (
+                                (assignedCommittee === "Marketing" && option.text.includes("(Marketing)")) ||
+                                (assignedCommittee === "Operations" && option.text.includes("(Operations)")) ||
+                                (assignedCommittee === "Community" && option.text.includes("(Community)"))
+                              );
+                              const isSharedHub = option.text.includes("Shared Hub");
+                              return (
+                                <button
+                                  key={option.id}
+                                  onClick={() => setSelectedOption2d(option.id)}
+                                  className={`w-full text-left px-6 py-4 border-2 rounded-xl transition-all duration-200 font-medium ${
+                                    selectedOption2d === option.id
+                                      ? "border-gray-900 bg-gray-900 text-white"
+                                      : isSharedHub
+                                      ? "border-amber-300 bg-amber-50 text-gray-900 hover:border-amber-400"
+                                      : isCommitteeInitiative
+                                      ? "border-blue-300 bg-blue-50 text-gray-900 hover:border-blue-400"
+                                      : "border-gray-200 bg-gray-50 text-gray-900 hover:border-gray-400 hover:bg-white"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span>{option.text}</span>
+                                    {isSharedHub && selectedOption2d !== option.id && (
+                                      <span className="text-xs text-amber-600 font-semibold">🎁 Bonus Option</span>
+                                    )}
+                                    {isCommitteeInitiative && !isSharedHub && selectedOption2d !== option.id && (
+                                      <span className="text-xs text-blue-600 font-semibold">👥 Your Committee</span>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={handleVoteSubmit2d}
+                          disabled={selectedOption2d === null || isSubmitting2d}
+                          className="w-full bg-gray-900 text-white px-8 py-4 rounded-xl text-lg font-semibold transition-all duration-300 hover:bg-gray-800 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSubmitting2d ? "Encrypting and submitting..." : "Submit Private Vote"}
+                        </button>
+
+                        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                          <p className="text-xs text-blue-800">
+                            <strong>How it works:</strong> You&apos;ll be asked to sign a message with your wallet. 
+                            This signature will be encrypted and submitted to the blockchain. Only the organizer can decrypt and tally the votes to present the final results. Individual votes remain secret.
+                          </p>
+                        </div>
+                      </>
+                    )}
+
+                    {hasVoted2d && (
+                      <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+                        <p className="text-sm font-semibold text-green-800 text-center">
+                          ✓ Your encrypted vote has been recorded on the blockchain
+                        </p>
+                        <p className="text-xs text-green-700 text-center mt-1">
+                          The organizer will present the results after voting closes
+                        </p>
+                      </div>
+                    )}
+
+                    {electionStatus2d === "Closed" && (
                       <div className="border-t-2 border-gray-200 pt-6 mt-6">
                         <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
                           <p className="text-sm text-blue-800 font-medium text-center">
