@@ -22,6 +22,20 @@ const VOTING_WORKSHOP_ABI = [
     type: "function",
   },
   {
+    inputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    name: "idToAddress",
+    outputs: [{ internalType: "address", name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "getTotalRegistered",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
     inputs: [
       { internalType: "uint256", name: "electionId", type: "uint256" },
       { internalType: "uint256", name: "choice", type: "uint256" }
@@ -134,6 +148,10 @@ export default function VotingBooth() {
   // Committee assignment (same for all votes 2a-2d)
   const [assignedCommittee, setAssignedCommittee] = useState<string | null>(null);
   
+  // Voter list modal
+  const [showVoterListModal, setShowVoterListModal] = useState(false);
+  const [allVoters, setAllVoters] = useState<Array<{ id: number; address: string; committee: string }>>([]);
+  
   // Vote 2a state (public)
   const [selectedOption2a, setSelectedOption2a] = useState<number | null>(null);
   const [isSubmitting2a, setIsSubmitting2a] = useState(false);
@@ -221,6 +239,48 @@ export default function VotingBooth() {
       showErrorToast(error);
     },
   });
+
+  // Function to fetch all registered voters and their committee assignments
+  const fetchAllVoters = async () => {
+    try {
+      const publicClient = createPublicClient({
+        chain: statusNetworkSepolia,
+        transport: http("https://public.sepolia.rpc.status.network"),
+      });
+
+      // Get total number of registered users
+      const totalRegistered = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getTotalRegistered",
+        args: [],
+      });
+
+      const total = Number(totalRegistered);
+      const voters: Array<{ id: number; address: string; committee: string }> = [];
+
+      // Fetch each voter's address and calculate committee
+      for (let i = 1; i <= total; i++) {
+        const address = await publicClient.readContract({
+          address: VOTING_CONTRACT_ADDRESS,
+          abi: VOTING_WORKSHOP_ABI,
+          functionName: "idToAddress",
+          args: [BigInt(i)],
+        });
+
+        const committee = getAssignedCommittee(address as string);
+        voters.push({
+          id: i,
+          address: address as string,
+          committee: committee,
+        });
+      }
+
+      setAllVoters(voters);
+    } catch (error) {
+      console.error("Error fetching all voters:", error);
+    }
+  };
 
   // Function to fetch election results for Vote 0
   const fetchElectionResults0 = async (autoCollapseOnLoad = false) => {
@@ -1078,6 +1138,33 @@ export default function VotingBooth() {
     }
   };
 
+  const handleOpenVoterList = async () => {
+    if (allVoters.length === 0) {
+      await fetchAllVoters();
+    }
+    setShowVoterListModal(true);
+  };
+
+  // Helper function to get committee prefix
+  const getCommitteePrefix = (committee: string): string => {
+    if (committee === "Marketing") return "M";
+    if (committee === "Operations") return "O";
+    if (committee === "Community") return "C";
+    return "";
+  };
+
+  // Helper function to get voter info including committee by voter ID
+  const getVoterInfo = (voterId: number) => {
+    const voter = allVoters.find((v) => v.id === voterId);
+    if (voter) {
+      return {
+        prefix: getCommitteePrefix(voter.committee),
+        display: `${getCommitteePrefix(voter.committee)}: #${voterId}`,
+      };
+    }
+    return { prefix: "", display: `#${voterId}` };
+  };
+
   if (!ready || loading) {
     return <FullScreenLoader />;
   }
@@ -1777,17 +1864,6 @@ export default function VotingBooth() {
 
               {hasVoted1a && !vote1bCollapsed && (
                 <div className="p-8 space-y-6">
-                  {/* Private Voting Badge */}
-                  <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
-                    <p className="text-sm font-semibold text-purple-900 text-center flex items-center justify-center gap-2">
-                      <span>🔒</span>
-                      <span>Private Voting - Your vote is encrypted and secret</span>
-                    </p>
-                    <p className="text-xs text-purple-700 text-center mt-1">
-                      The organizer will present the results after voting closes
-                    </p>
-                  </div>
-
                   {/* District Assignment Banner for Vote 1b */}
                   {assignedDistrict1b && (
                     <div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-4">
@@ -1941,15 +2017,23 @@ export default function VotingBooth() {
 
               {hasVoted1b && !vote2aCollapsed && (
                 <div className="p-8 space-y-6">
-                  {/* Committee Assignment Banner */}
+                  {/* Committee Assignment Banner with View All button */}
                   {assignedCommittee && (
-                    <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-                      <p className="text-sm font-semibold text-blue-900 text-center">
-                        👥 Your Committee: <span className="text-lg font-bold">{assignedCommittee}</span>
-                      </p>
-                      <p className="text-xs text-blue-700 text-center mt-1">
-                        Initiative {assignedCommittee === "Marketing" ? "A" : assignedCommittee === "Operations" ? "B" : "C"} best serves your committee
-                      </p>
+                    <div className="space-y-3">
+                      <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                        <p className="text-sm font-semibold text-blue-900 text-center">
+                          👥 Your Committee: <span className="text-lg font-bold">{assignedCommittee}</span>
+                        </p>
+                        <p className="text-xs text-blue-700 text-center mt-1">
+                          Initiative {assignedCommittee === "Marketing" ? "A" : assignedCommittee === "Operations" ? "B" : "C"} best serves your committee
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleOpenVoterList}
+                        className="w-full px-4 py-2 bg-gray-100 hover:bg-gray-200 border-2 border-gray-300 rounded-lg text-sm font-medium text-gray-700 transition-all"
+                      >
+                        📋 View Committee Composition
+                      </button>
                     </div>
                   )}
 
@@ -2134,18 +2218,21 @@ export default function VotingBooth() {
                                   }`}>
                                     <p className="text-xs text-gray-600 mb-1">Voters:</p>
                                     <div className="flex flex-wrap gap-1">
-                                      {voters.map((voterId) => (
-                                        <span
-                                          key={voterId}
-                                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                            voterId === Number(userId)
-                                              ? "bg-blue-200 text-blue-800"
-                                              : "bg-gray-200 text-gray-700"
-                                          }`}
-                                        >
-                                          #{voterId}
-                                        </span>
-                                      ))}
+                                      {voters.map((voterId) => {
+                                        const voterInfo = getVoterInfo(voterId);
+                                        return (
+                                          <span
+                                            key={voterId}
+                                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                              voterId === Number(userId)
+                                                ? "bg-blue-200 text-blue-800"
+                                                : "bg-gray-200 text-gray-700"
+                                            }`}
+                                          >
+                                            {voterInfo.display}
+                                          </span>
+                                        );
+                                      })}
                                     </div>
                                   </div>
                                 )}
@@ -2203,15 +2290,23 @@ export default function VotingBooth() {
 
               {hasVoted2a && !vote2bCollapsed && (
                 <div className="p-8 space-y-6">
-                  {/* Committee Assignment Banner */}
+                  {/* Committee Assignment Banner with View All button */}
                   {assignedCommittee && (
-                    <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-                      <p className="text-sm font-semibold text-blue-900 text-center">
-                        👥 Your Committee: <span className="text-lg font-bold">{assignedCommittee}</span>
-                      </p>
-                      <p className="text-xs text-blue-700 text-center mt-1">
-                        Initiative {assignedCommittee === "Marketing" ? "A" : assignedCommittee === "Operations" ? "B" : "C"} best serves your committee
-                      </p>
+                    <div className="space-y-3">
+                      <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                        <p className="text-sm font-semibold text-blue-900 text-center">
+                          👥 Your Committee: <span className="text-lg font-bold">{assignedCommittee}</span>
+                        </p>
+                        <p className="text-xs text-blue-700 text-center mt-1">
+                          Initiative {assignedCommittee === "Marketing" ? "A" : assignedCommittee === "Operations" ? "B" : "C"} best serves your committee
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleOpenVoterList}
+                        className="w-full px-4 py-2 bg-gray-100 hover:bg-gray-200 border-2 border-gray-300 rounded-lg text-sm font-medium text-gray-700 transition-all"
+                      >
+                        📋 View Committee Composition
+                      </button>
                     </div>
                   )}
 
@@ -2396,18 +2491,21 @@ export default function VotingBooth() {
                                   }`}>
                                     <p className="text-xs text-gray-600 mb-1">Voters:</p>
                                     <div className="flex flex-wrap gap-1">
-                                      {voters.map((voterId) => (
-                                        <span
-                                          key={voterId}
-                                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                            voterId === Number(userId)
-                                              ? "bg-blue-200 text-blue-800"
-                                              : "bg-gray-200 text-gray-700"
-                                          }`}
-                                        >
-                                          #{voterId}
-                                        </span>
-                                      ))}
+                                      {voters.map((voterId) => {
+                                        const voterInfo = getVoterInfo(voterId);
+                                        return (
+                                          <span
+                                            key={voterId}
+                                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                              voterId === Number(userId)
+                                                ? "bg-blue-200 text-blue-800"
+                                                : "bg-gray-200 text-gray-700"
+                                            }`}
+                                          >
+                                            {voterInfo.display}
+                                          </span>
+                                        );
+                                      })}
                                     </div>
                                   </div>
                                 )}
@@ -2465,17 +2563,6 @@ export default function VotingBooth() {
 
               {hasVoted2b && !vote2cCollapsed && (
                 <div className="p-8 space-y-6">
-                  {/* Private Voting Badge */}
-                  <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
-                    <p className="text-sm font-semibold text-purple-900 text-center flex items-center justify-center gap-2">
-                      <span>🔒</span>
-                      <span>Private Voting - Your vote is encrypted and secret</span>
-                    </p>
-                    <p className="text-xs text-purple-700 text-center mt-1">
-                      The organizer will present the results after voting closes
-                    </p>
-                  </div>
-
                   {/* Committee Assignment Banner */}
                   {assignedCommittee && (
                     <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
@@ -2639,17 +2726,6 @@ export default function VotingBooth() {
                     </p>
                   </div>
 
-                  {/* Private Voting Badge */}
-                  <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
-                    <p className="text-sm font-semibold text-purple-900 text-center flex items-center justify-center gap-2">
-                      <span>🔒</span>
-                      <span>Private Voting - Your vote is encrypted and secret</span>
-                    </p>
-                    <p className="text-xs text-purple-700 text-center mt-1">
-                      The organizer will present the results after voting closes
-                    </p>
-                  </div>
-
                   {/* Committee Assignment Banner */}
                   {assignedCommittee && (
                     <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
@@ -2768,6 +2844,64 @@ export default function VotingBooth() {
           )}
         </div>
       </main>
+
+      {/* Voter List Modal */}
+      {showVoterListModal && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          onClick={() => setShowVoterListModal(false)}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b-2 border-gray-200 bg-gray-50">
+              <h2 className="text-xl font-bold text-gray-900">Committee Composition</h2>
+              <button
+                onClick={() => setShowVoterListModal(false)}
+                className="text-gray-500 hover:text-gray-700 text-2xl font-bold w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-200 transition-colors"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 overflow-y-auto flex-1">
+              {allVoters.length === 0 ? (
+                <p className="text-center text-gray-500">Loading voters...</p>
+              ) : (
+                <div className="space-y-6">
+                  {/* Group by Committee */}
+                  {["Marketing", "Operations", "Community"].map((committee) => {
+                    const committeeVoters = allVoters.filter((v) => v.committee === committee);
+                    
+                    return (
+                      <div key={committee} className="bg-gray-50 rounded-xl p-4 border-2 border-gray-200">
+                        <h3 className="font-bold text-lg text-gray-900 mb-3">
+                          {committee} Committee ({committeeVoters.length} members)
+                        </h3>
+                        <div className="flex flex-wrap gap-2">
+                          {committeeVoters.map((voter) => (
+                            <span
+                              key={voter.id}
+                              className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-white border-2 border-gray-300 text-gray-800"
+                            >
+                              #{voter.id}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <ToastContainer
         position="top-center"
         autoClose={5000}
