@@ -55,7 +55,7 @@ export const VOTES_CONFIG: Record<string, VoteConfig> = {
       { id: 1, text: "Feeling Messi-level productive today" },
       { id: 2, text: "Surviving on empanadas and wine" },
       { id: 3, text: "Could use a siesta." },
-      { id: 4, text: "Like the peso — not so stable." },
+      { id: 4, text: "Like the Buenos Aires weather - a bit unpredictable" },
     ],
   },
 
