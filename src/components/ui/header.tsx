@@ -75,16 +75,6 @@ export function Header() {
         >
           Prizes
         </Link>
-        <Link
-          href="/cheatsheet"
-          className={`text-sm font-medium transition-colors duration-200 cursor-pointer bg-gray-100 px-2 py-1 ${
-            pathname === "/cheatsheet" 
-              ? "text-gray-900" 
-              : "text-gray-600 hover:text-gray-900"
-          }`}
-        >
-          Cheatsheet
-        </Link>
       </nav>
 
       {authenticated && ethereumWallet && (
