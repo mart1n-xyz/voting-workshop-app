@@ -953,7 +953,7 @@ export default function VotingBooth() {
 
   // Auto-refresh results for Vote 0 every 5 seconds (only when Open)
   useEffect(() => {
-    if (!vote0Config || !task1Complete || electionStatus0 !== "Open") return;
+    if (!vote0Config || electionStatus0 !== "Open") return;
 
     const intervalId = setInterval(() => {
       fetchElectionResults0();
@@ -961,11 +961,11 @@ export default function VotingBooth() {
 
     return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vote0Config, task1Complete, electionStatus0]);
+  }, [vote0Config, electionStatus0]);
 
   // Auto-refresh results for Vote 1a every 5 seconds (only when Open)
   useEffect(() => {
-    if (!vote1aConfig || !task1Complete || !hasVoted0 || electionStatus1a !== "Open") return;
+    if (!vote1aConfig || electionStatus1a !== "Open") return;
 
     const intervalId = setInterval(() => {
       fetchElectionResults1a();
@@ -973,11 +973,11 @@ export default function VotingBooth() {
 
     return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vote1aConfig, task1Complete, hasVoted0, electionStatus1a]);
+  }, [vote1aConfig, electionStatus1a]);
 
   // Check if Vote 1b election closed (stop checking once closed)
   useEffect(() => {
-    if (!vote1bConfig || !task1Complete || !hasVoted1a || electionStatus1b === "Closed") return;
+    if (!vote1bConfig || electionStatus1b === "Closed") return;
 
     const intervalId = setInterval(() => {
       fetchElectionStatus1b();
@@ -985,11 +985,11 @@ export default function VotingBooth() {
 
     return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vote1bConfig, task1Complete, hasVoted1a, electionStatus1b]);
+  }, [vote1bConfig, electionStatus1b]);
 
   // Auto-refresh results for Vote 2a every 5 seconds (only when Open)
   useEffect(() => {
-    if (!vote2aConfig || !task1Complete || !hasVoted1b || electionStatus2a !== "Open") return;
+    if (!vote2aConfig || electionStatus2a !== "Open") return;
 
     const intervalId = setInterval(() => {
       fetchElectionResults2a();
@@ -997,11 +997,11 @@ export default function VotingBooth() {
 
     return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vote2aConfig, task1Complete, hasVoted1b, electionStatus2a]);
+  }, [vote2aConfig, electionStatus2a]);
 
   // Auto-refresh results for Vote 2b every 5 seconds (only when Open)
   useEffect(() => {
-    if (!vote2bConfig || !task1Complete || !hasVoted2a || electionStatus2b !== "Open") return;
+    if (!vote2bConfig || electionStatus2b !== "Open") return;
 
     const intervalId = setInterval(() => {
       fetchElectionResults2b();
@@ -1009,11 +1009,11 @@ export default function VotingBooth() {
 
     return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vote2bConfig, task1Complete, hasVoted2a, electionStatus2b]);
+  }, [vote2bConfig, electionStatus2b]);
 
   // Check if Vote 2c election closed (stop checking once closed)
   useEffect(() => {
-    if (!vote2cConfig || !task1Complete || !hasVoted2b || electionStatus2c === "Closed") return;
+    if (!vote2cConfig || electionStatus2c === "Closed") return;
 
     const intervalId = setInterval(() => {
       fetchElectionStatus2c();
@@ -1021,11 +1021,11 @@ export default function VotingBooth() {
 
     return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vote2cConfig, task1Complete, hasVoted2b, electionStatus2c]);
+  }, [vote2cConfig, electionStatus2c]);
 
   // Check if Vote 2d election closed (stop checking once closed)
   useEffect(() => {
-    if (!vote2dConfig || !task1Complete || !hasVoted2c || electionStatus2d === "Closed") return;
+    if (!vote2dConfig || electionStatus2d === "Closed") return;
 
     const intervalId = setInterval(() => {
       fetchElectionStatus2d();
@@ -1033,11 +1033,11 @@ export default function VotingBooth() {
 
     return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vote2dConfig, task1Complete, hasVoted2c, electionStatus2d]);
+  }, [vote2dConfig, electionStatus2d]);
 
   // Auto-refresh results for Vote 3 every 5 seconds (only when Open)
   useEffect(() => {
-    if (!vote3Config || !task1Complete || !hasVoted2d || electionStatus3 !== "Open") return;
+    if (!vote3Config || electionStatus3 !== "Open") return;
 
     const intervalId = setInterval(() => {
       fetchElectionResults3();
@@ -1045,7 +1045,7 @@ export default function VotingBooth() {
 
     return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vote3Config, task1Complete, hasVoted2d, electionStatus3]);
+  }, [vote3Config, electionStatus3]);
 
   const handleRefreshResults0 = async () => {
     setIsRefreshingResults0(true);
@@ -1413,9 +1413,7 @@ export default function VotingBooth() {
           </div>
 
           {/* Task 2: Vote 0 - Training Ground */}
-          <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
-            task1Complete ? "border-gray-200" : "border-gray-100 opacity-50"
-          }`}>
+          <div className="bg-white rounded-2xl border-2 border-gray-200 overflow-hidden shadow-sm transition-all duration-300">
             <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
               {hasVoted0 ? (
                 <CheckCircleIcon className="w-7 h-7 text-green-600" />
@@ -1428,30 +1426,25 @@ export default function VotingBooth() {
                 <h2 className="text-xl font-bold text-gray-900">
                   {vote0Config.title}
                 </h2>
-                {!task1Complete && (
-                  <p className="text-sm text-gray-500">Complete previous task to unlock</p>
-                )}
                 {hasVoted0 && electionStatus0 === "Open" && (
                   <p className="text-sm text-green-600 font-medium">Voted</p>
                 )}
                 {electionStatus0 === "Closed" && (
                   <p className="text-sm text-blue-600 font-medium">Closed</p>
                 )}
-                {electionStatus0 === null && task1Complete && (
+                {electionStatus0 === null && (
                   <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
                 )}
               </div>
-              {task1Complete && (
-                <button
-                  onClick={() => setVote0Collapsed(!vote0Collapsed)}
-                  className="text-sm text-gray-500 hover:text-gray-700 underline"
-                >
-                  {vote0Collapsed ? "Expand" : "Collapse"}
-                </button>
-              )}
+              <button
+                onClick={() => setVote0Collapsed(!vote0Collapsed)}
+                className="text-sm text-gray-500 hover:text-gray-700 underline"
+              >
+                {vote0Collapsed ? "Expand" : "Collapse"}
+              </button>
             </div>
 
-{task1Complete && !vote0Collapsed && (
+{!vote0Collapsed && (
               <div className="p-8 space-y-6">
                 {vote0Config.isPractice && (
                   <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
@@ -1668,9 +1661,7 @@ export default function VotingBooth() {
 
           {/* Task 3: Vote 1a - Coordination */}
           {vote1aConfig && (
-            <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
-              hasVoted0 ? "border-gray-200" : "border-gray-100 opacity-50"
-            }`}>
+            <div className="bg-white rounded-2xl border-2 border-gray-200 overflow-hidden shadow-sm transition-all duration-300">
               <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
                 {hasVoted1a ? (
                   <CheckCircleIcon className="w-7 h-7 text-green-600" />
@@ -1683,30 +1674,25 @@ export default function VotingBooth() {
                   <h2 className="text-xl font-bold text-gray-900">
                     {vote1aConfig.title}
                   </h2>
-                  {!hasVoted0 && (
-                    <p className="text-sm text-gray-500">Complete previous task to unlock</p>
-                  )}
                   {hasVoted1a && electionStatus1a === "Open" && (
                     <p className="text-sm text-green-600 font-medium">Voted</p>
                   )}
                   {electionStatus1a === "Closed" && (
                     <p className="text-sm text-blue-600 font-medium">Closed</p>
                   )}
-                  {electionStatus1a === null && hasVoted0 && (
+                  {electionStatus1a === null && (
                     <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
                   )}
                 </div>
-                {hasVoted0 && (
-                  <button
-                    onClick={() => setVote1aCollapsed(!vote1aCollapsed)}
-                    className="text-sm text-gray-500 hover:text-gray-700 underline"
-                  >
-                    {vote1aCollapsed ? "Expand" : "Collapse"}
-                  </button>
-                )}
+                <button
+                  onClick={() => setVote1aCollapsed(!vote1aCollapsed)}
+                  className="text-sm text-gray-500 hover:text-gray-700 underline"
+                >
+                  {vote1aCollapsed ? "Expand" : "Collapse"}
+                </button>
               </div>
 
-              {hasVoted0 && !vote1aCollapsed && (
+              {!vote1aCollapsed && (
                 <div className="p-8 space-y-6">
                   {/* District Assignment Banner */}
                   {assignedDistrict && (
@@ -1968,9 +1954,7 @@ export default function VotingBooth() {
 
           {/* Task 4: Vote 1b - Private Coordination */}
           {vote1bConfig && (
-            <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
-              hasVoted1a ? "border-gray-200" : "border-gray-100 opacity-50"
-            }`}>
+            <div className="bg-white rounded-2xl border-2 border-gray-200 overflow-hidden shadow-sm transition-all duration-300">
               <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
                 {hasVoted1b ? (
                   <CheckCircleIcon className="w-7 h-7 text-green-600" />
@@ -1983,30 +1967,25 @@ export default function VotingBooth() {
                   <h2 className="text-xl font-bold text-gray-900">
                     {vote1bConfig.title}
                   </h2>
-                  {!hasVoted1a && (
-                    <p className="text-sm text-gray-500">Complete previous task to unlock</p>
-                  )}
                   {hasVoted1b && electionStatus1b === "Open" && (
                     <p className="text-sm text-green-600 font-medium">Voted</p>
                   )}
                   {electionStatus1b === "Closed" && (
                     <p className="text-sm text-blue-600 font-medium">Closed</p>
                   )}
-                  {electionStatus1b === null && hasVoted1a && (
+                  {electionStatus1b === null && (
                     <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
                   )}
                 </div>
-                {hasVoted1a && (
-                  <button
-                    onClick={() => setVote1bCollapsed(!vote1bCollapsed)}
-                    className="text-sm text-gray-500 hover:text-gray-700 underline"
-                  >
-                    {vote1bCollapsed ? "Expand" : "Collapse"}
-                  </button>
-                )}
+                <button
+                  onClick={() => setVote1bCollapsed(!vote1bCollapsed)}
+                  className="text-sm text-gray-500 hover:text-gray-700 underline"
+                >
+                  {vote1bCollapsed ? "Expand" : "Collapse"}
+                </button>
               </div>
 
-              {hasVoted1a && !vote1bCollapsed && (
+              {!vote1bCollapsed && (
                 <div className="p-8 space-y-6">
                   {/* District Assignment Banner for Vote 1b */}
                   {assignedDistrict1b && (
@@ -2121,9 +2100,7 @@ export default function VotingBooth() {
 
           {/* Task 5: Vote 2a - Reciprocity Round 1 (Public) */}
           {vote2aConfig && (
-            <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
-              hasVoted1b ? "border-gray-200" : "border-gray-100 opacity-50"
-            }`}>
+            <div className="bg-white rounded-2xl border-2 border-gray-200 overflow-hidden shadow-sm transition-all duration-300">
               <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
                 {hasVoted2a ? (
                   <CheckCircleIcon className="w-7 h-7 text-green-600" />
@@ -2136,30 +2113,25 @@ export default function VotingBooth() {
                   <h2 className="text-xl font-bold text-gray-900">
                     {vote2aConfig.title}
                   </h2>
-                  {!hasVoted1b && (
-                    <p className="text-sm text-gray-500">Complete previous task to unlock</p>
-                  )}
                   {hasVoted2a && electionStatus2a === "Open" && (
                     <p className="text-sm text-green-600 font-medium">Voted</p>
                   )}
                   {electionStatus2a === "Closed" && (
                     <p className="text-sm text-blue-600 font-medium">Closed</p>
                   )}
-                  {electionStatus2a === null && hasVoted1b && (
+                  {electionStatus2a === null && (
                     <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
                   )}
                 </div>
-                {hasVoted1b && (
-                  <button
-                    onClick={() => setVote2aCollapsed(!vote2aCollapsed)}
-                    className="text-sm text-gray-500 hover:text-gray-700 underline"
-                  >
-                    {vote2aCollapsed ? "Expand" : "Collapse"}
-                  </button>
-                )}
+                <button
+                  onClick={() => setVote2aCollapsed(!vote2aCollapsed)}
+                  className="text-sm text-gray-500 hover:text-gray-700 underline"
+                >
+                  {vote2aCollapsed ? "Expand" : "Collapse"}
+                </button>
               </div>
 
-              {hasVoted1b && !vote2aCollapsed && (
+              {!vote2aCollapsed && (
                 <div className="p-8 space-y-6">
                   {/* Committee Assignment Banner with View All button */}
                   {assignedCommittee && (
@@ -2394,9 +2366,7 @@ export default function VotingBooth() {
 
           {/* Task 6: Vote 2b - Reciprocity Round 2 (Public) */}
           {vote2bConfig && (
-            <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
-              hasVoted2a ? "border-gray-200" : "border-gray-100 opacity-50"
-            }`}>
+            <div className="bg-white rounded-2xl border-2 border-gray-200 overflow-hidden shadow-sm transition-all duration-300">
               <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
                 {hasVoted2b ? (
                   <CheckCircleIcon className="w-7 h-7 text-green-600" />
@@ -2409,30 +2379,25 @@ export default function VotingBooth() {
                   <h2 className="text-xl font-bold text-gray-900">
                     {vote2bConfig.title}
                   </h2>
-                  {!hasVoted2a && (
-                    <p className="text-sm text-gray-500">Complete previous task to unlock</p>
-                  )}
                   {hasVoted2b && electionStatus2b === "Open" && (
                     <p className="text-sm text-green-600 font-medium">Voted</p>
                   )}
                   {electionStatus2b === "Closed" && (
                     <p className="text-sm text-blue-600 font-medium">Closed</p>
                   )}
-                  {electionStatus2b === null && hasVoted2a && (
+                  {electionStatus2b === null && (
                     <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
                   )}
                 </div>
-                {hasVoted2a && (
-                  <button
-                    onClick={() => setVote2bCollapsed(!vote2bCollapsed)}
-                    className="text-sm text-gray-500 hover:text-gray-700 underline"
-                  >
-                    {vote2bCollapsed ? "Expand" : "Collapse"}
-                  </button>
-                )}
+                <button
+                  onClick={() => setVote2bCollapsed(!vote2bCollapsed)}
+                  className="text-sm text-gray-500 hover:text-gray-700 underline"
+                >
+                  {vote2bCollapsed ? "Expand" : "Collapse"}
+                </button>
               </div>
 
-              {hasVoted2a && !vote2bCollapsed && (
+              {!vote2bCollapsed && (
                 <div className="p-8 space-y-6">
                   {/* Committee Assignment Banner with View All button */}
                   {assignedCommittee && (
@@ -2667,9 +2632,7 @@ export default function VotingBooth() {
 
           {/* Task 7: Vote 2c - Reciprocity Round 3 (Private) */}
           {vote2cConfig && (
-            <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
-              hasVoted2b ? "border-gray-200" : "border-gray-100 opacity-50"
-            }`}>
+            <div className="bg-white rounded-2xl border-2 border-gray-200 overflow-hidden shadow-sm transition-all duration-300">
               <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
                 {hasVoted2c ? (
                   <CheckCircleIcon className="w-7 h-7 text-green-600" />
@@ -2682,30 +2645,25 @@ export default function VotingBooth() {
                   <h2 className="text-xl font-bold text-gray-900">
                     {vote2cConfig.title}
                   </h2>
-                  {!hasVoted2b && (
-                    <p className="text-sm text-gray-500">Complete previous task to unlock</p>
-                  )}
                   {hasVoted2c && electionStatus2c === "Open" && (
                     <p className="text-sm text-green-600 font-medium">Voted</p>
                   )}
                   {electionStatus2c === "Closed" && (
                     <p className="text-sm text-blue-600 font-medium">Closed</p>
                   )}
-                  {electionStatus2c === null && hasVoted2b && (
+                  {electionStatus2c === null && (
                     <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
                   )}
                 </div>
-                {hasVoted2b && (
-                  <button
-                    onClick={() => setVote2cCollapsed(!vote2cCollapsed)}
-                    className="text-sm text-gray-500 hover:text-gray-700 underline"
-                  >
-                    {vote2cCollapsed ? "Expand" : "Collapse"}
-                  </button>
-                )}
+                <button
+                  onClick={() => setVote2cCollapsed(!vote2cCollapsed)}
+                  className="text-sm text-gray-500 hover:text-gray-700 underline"
+                >
+                  {vote2cCollapsed ? "Expand" : "Collapse"}
+                </button>
               </div>
 
-              {hasVoted2b && !vote2cCollapsed && (
+              {!vote2cCollapsed && (
                 <div className="p-8 space-y-6">
                   {/* Committee Assignment Banner */}
                   {assignedCommittee && (
@@ -2820,9 +2778,7 @@ export default function VotingBooth() {
 
           {/* Task 8: Vote 2d - Reciprocity Round 4 (Private with Bonus) */}
           {vote2dConfig && (
-            <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
-              hasVoted2c ? "border-gray-200" : "border-gray-100 opacity-50"
-            }`}>
+            <div className="bg-white rounded-2xl border-2 border-gray-200 overflow-hidden shadow-sm transition-all duration-300">
               <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
                 {hasVoted2d ? (
                   <CheckCircleIcon className="w-7 h-7 text-green-600" />
@@ -2835,30 +2791,25 @@ export default function VotingBooth() {
                   <h2 className="text-xl font-bold text-gray-900">
                     {vote2dConfig.title}
                   </h2>
-                  {!hasVoted2c && (
-                    <p className="text-sm text-gray-500">Complete previous task to unlock</p>
-                  )}
                   {hasVoted2d && electionStatus2d === "Open" && (
                     <p className="text-sm text-green-600 font-medium">Voted</p>
                   )}
                   {electionStatus2d === "Closed" && (
                     <p className="text-sm text-blue-600 font-medium">Closed</p>
                   )}
-                  {electionStatus2d === null && hasVoted2c && (
+                  {electionStatus2d === null && (
                     <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
                   )}
                 </div>
-                {hasVoted2c && (
-                  <button
-                    onClick={() => setVote2dCollapsed(!vote2dCollapsed)}
-                    className="text-sm text-gray-500 hover:text-gray-700 underline"
-                  >
-                    {vote2dCollapsed ? "Expand" : "Collapse"}
-                  </button>
-                )}
+                <button
+                  onClick={() => setVote2dCollapsed(!vote2dCollapsed)}
+                  className="text-sm text-gray-500 hover:text-gray-700 underline"
+                >
+                  {vote2dCollapsed ? "Expand" : "Collapse"}
+                </button>
               </div>
 
-              {hasVoted2c && !vote2dCollapsed && (
+              {!vote2dCollapsed && (
                 <div className="p-8 space-y-6">
                   {/* Bonus Banner */}
                   <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-6">
@@ -2989,9 +2940,7 @@ export default function VotingBooth() {
 
           {/* Task 9: Vote 3 - Merit vs Luck */}
           {vote3Config && (
-            <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
-              hasVoted2d ? "border-gray-200" : "border-gray-100 opacity-50"
-            }`}>
+            <div className="bg-white rounded-2xl border-2 border-gray-200 overflow-hidden shadow-sm transition-all duration-300">
               <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
                 {hasVoted3 ? (
                   <CheckCircleIcon className="w-7 h-7 text-green-600" />
@@ -3004,30 +2953,25 @@ export default function VotingBooth() {
                   <h2 className="text-xl font-bold text-gray-900">
                     {vote3Config.title}
                   </h2>
-                  {!hasVoted2d && (
-                    <p className="text-sm text-gray-500">Complete previous task to unlock</p>
-                  )}
                   {hasVoted3 && electionStatus3 === "Open" && (
                     <p className="text-sm text-green-600 font-medium">Voted</p>
                   )}
                   {electionStatus3 === "Closed" && (
                     <p className="text-sm text-blue-600 font-medium">Closed</p>
                   )}
-                  {electionStatus3 === null && hasVoted2d && (
+                  {electionStatus3 === null && (
                     <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
                   )}
                 </div>
-                {hasVoted2d && (
-                  <button
-                    onClick={() => setVote3Collapsed(!vote3Collapsed)}
-                    className="text-sm text-gray-500 hover:text-gray-700 underline"
-                  >
-                    {vote3Collapsed ? "Expand" : "Collapse"}
-                  </button>
-                )}
+                <button
+                  onClick={() => setVote3Collapsed(!vote3Collapsed)}
+                  className="text-sm text-gray-500 hover:text-gray-700 underline"
+                >
+                  {vote3Collapsed ? "Expand" : "Collapse"}
+                </button>
               </div>
 
-              {hasVoted2d && !vote3Collapsed && (
+              {!vote3Collapsed && (
                 <div className="px-6 py-6 space-y-6">
                   <div className="space-y-4">
                     <div>
