@@ -33,7 +33,7 @@ function Home() {
   const { wallets } = useWallets();
   const { sendTransaction } = useSendTransaction();
   const router = useRouter();
-  const [copied, setCopied] = useState(false);
+  const [, setCopied] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
   const [isCheckingRegistration, setIsCheckingRegistration] = useState(true);
 
@@ -95,7 +95,7 @@ function Home() {
       });
 
       // Send the transaction
-      const txHash = await sendTransaction({
+      await sendTransaction({
         to: VOTING_CONTRACT_ADDRESS,
         data: data,
         value: BigInt(0),
@@ -230,7 +230,7 @@ function Home() {
             <div className="space-y-6 text-lg text-gray-700">
               <div className="space-y-3">
                 <p className="text-xl">
-                  Throughout this session you'll be using this single-use Privy wallet:
+                  Throughout this session you&apos;ll be using this single-use Privy wallet:
                 </p>
                 
                 {ethereumWallet ? (

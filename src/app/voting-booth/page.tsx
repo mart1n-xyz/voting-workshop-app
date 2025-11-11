@@ -141,7 +141,7 @@ export default function VotingBooth() {
   const [votersByChoice1a, setVotersByChoice1a] = useState<Record<number, number[]>>({});
   
   // Vote 1a state
-  const [assignedDistrict1a, setAssignedDistrict1a] = useState<string | null>(null);
+  const [, setAssignedDistrict1a] = useState<string | null>(null);
   // Vote 1b has its own district assignment (independent from 1a)
   const [assignedDistrict1b, setAssignedDistrict1b] = useState<string | null>(null);
   
@@ -1825,7 +1825,7 @@ export default function VotingBooth() {
                       </div>
 
                       {/* 60% Threshold Alert */}
-                      {vote1aConfig.coordinationThreshold && voteCounts1a.some((count, index) => {
+                      {vote1aConfig.coordinationThreshold && voteCounts1a.some((count) => {
                         const percentage = totalVotes1a > 0 ? (count / totalVotes1a) : 0;
                         return percentage >= vote1aConfig.coordinationThreshold!;
                       }) && (

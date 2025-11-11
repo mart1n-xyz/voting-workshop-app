@@ -10,7 +10,7 @@ export function Header() {
   const { authenticated, logout } = usePrivy();
   const { wallets } = useWallets();
   const pathname = usePathname();
-  const [copied, setCopied] = useState(false);
+  const [, setCopied] = useState(false);
 
   const ethereumWallet = wallets.find((wallet) => wallet.walletClientType === "privy");
 

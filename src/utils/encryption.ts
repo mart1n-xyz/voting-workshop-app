@@ -115,8 +115,10 @@ export function encryptMessage(message: string): string {
  * @returns True if signature is valid
  */
 export function verifySignature(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _message: string,
   signature: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _address: string
 ): boolean {
   // We'll use ethers or viem for full verification

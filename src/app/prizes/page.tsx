@@ -24,7 +24,7 @@ export default function Prizes() {
             
             <div className="space-y-4 text-gray-700">
               <p>
-                To make this workshop engaging and meaningful, you'll earn points for your participation throughout the session. For each vote, the organizer will explain how points are awarded. Your point balance will update asynchronously once the organizer submits allocations to the smart contract.
+                To make this workshop engaging and meaningful, you&apos;ll earn points for your participation throughout the session. For each vote, the organizer will explain how points are awarded. Your point balance will update asynchronously once the organizer submits allocations to the smart contract.
               </p>
               
               <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-6 space-y-3">
@@ -33,7 +33,7 @@ export default function Prizes() {
                   <span>Note:</span>
                 </p>
                 <p className="ml-8 text-gray-700">
-                  The point allocation system directly rewards participation, but also incorporates a random factor from group assignments, as well as the impact of group voting outcomes influenced by other participants' choices.
+                  The point allocation system directly rewards participation, but also incorporates a random factor from group assignments, as well as the impact of group voting outcomes influenced by other participants&apos; choices.
                 </p>
               </div>
 
@@ -90,7 +90,7 @@ export default function Prizes() {
                     Second & Third Place
                   </h3>
                   <p className="text-lg font-semibold text-gray-800 mb-4">
-                    "Farewell to Westphalia" Books by Jarrad Hope and Peter Ludlow
+                    &quot;Farewell to Westphalia&quot; Books by Jarrad Hope and Peter Ludlow
                   </p>
                   
                   <div className="space-y-3 text-gray-800">

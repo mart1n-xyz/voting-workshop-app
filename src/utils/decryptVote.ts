@@ -10,25 +10,6 @@ let nacl: any;
 let util: any;
 let verifyMessage: any;
 
-// Initialize modules (works in both Node and browser)
-const initModules = async () => {
-  if (typeof window === 'undefined') {
-    // Node.js environment
-    nacl = require('tweetnacl');
-    util = require('tweetnacl-util');
-    const viem = require('viem');
-    verifyMessage = viem.verifyMessage;
-  } else {
-    // Browser environment
-    const naclModule = await import('tweetnacl');
-    const utilModule = await import('tweetnacl-util');
-    const viemModule = await import('viem');
-    nacl = naclModule;
-    util = utilModule;
-    verifyMessage = viemModule.verifyMessage;
-  }
-};
-
 /**
  * Vote options for verification
  * Must match the options in votesConfig.ts
@@ -41,9 +22,13 @@ export const VOTE_1B_OPTIONS = [
 ];
 
 // Initialize immediately for CommonJS
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 if (typeof window === 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   nacl = require('tweetnacl');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   util = require('tweetnacl-util');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const viem = require('viem');
   verifyMessage = viem.verifyMessage;
 }
