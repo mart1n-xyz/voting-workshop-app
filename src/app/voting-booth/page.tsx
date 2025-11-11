@@ -11,6 +11,7 @@ import { CheckCircleIcon } from "@heroicons/react/24/solid";
 import { ToastContainer } from "react-toastify";
 import { showSuccessToast, showErrorToast } from "@/components/ui/custom-toast";
 import { getVoteConfig, VOTING_CONTRACT_ADDRESS, getAssignedDistrict } from "@/config/votesConfig";
+import { usePrivateVoting } from "@/hooks/usePrivateVoting";
 
 const VOTING_WORKSHOP_ABI = [
   {
@@ -26,6 +27,16 @@ const VOTING_WORKSHOP_ABI = [
       { internalType: "uint256", name: "choice", type: "uint256" }
     ],
     name: "castPublicVote",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "uint256", name: "electionId", type: "uint256" },
+      { internalType: "bytes", name: "encryptedSignature", type: "bytes" }
+    ],
+    name: "castPrivateVote",
     outputs: [],
     stateMutability: "nonpayable",
     type: "function",
@@ -78,6 +89,13 @@ const VOTING_WORKSHOP_ABI = [
     stateMutability: "view",
     type: "function",
   },
+  {
+    inputs: [{ internalType: "uint256", name: "electionId", type: "uint256" }],
+    name: "getVoteCount",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
 ] as const;
 
 export default function VotingBooth() {
@@ -91,6 +109,7 @@ export default function VotingBooth() {
   const [task1Collapsed, setTask1Collapsed] = useState(false);
   const [vote0Collapsed, setVote0Collapsed] = useState(false);
   const [vote1aCollapsed, setVote1aCollapsed] = useState(false);
+  const [vote1bCollapsed, setVote1bCollapsed] = useState(false);
   
   // Vote 0 state
   const [selectedOption0, setSelectedOption0] = useState<number | null>(null);
@@ -117,6 +136,26 @@ export default function VotingBooth() {
   
   const vote0Config = getVoteConfig("vote0");
   const vote1aConfig = getVoteConfig("vote1a");
+  const vote1bConfig = getVoteConfig("vote1b");
+  
+  // Vote 1b state (private vote)
+  const [selectedOption1b, setSelectedOption1b] = useState<number | null>(null);
+  const [hasVoted1b, setHasVoted1b] = useState(false);
+  const [electionStatus1b, setElectionStatus1b] = useState<"Open" | "Closed" | null>(null);
+  const [totalVotes1b, setTotalVotes1b] = useState(0);
+  
+  // Private voting hook for vote 1b
+  const { submitPrivateVote: submitVote1b, isSubmitting: isSubmitting1b } = usePrivateVoting({
+    voteConfig: vote1bConfig!,
+    onSuccess: () => {
+      showSuccessToast("Your private vote has been recorded!");
+      setHasVoted1b(true);
+      setTimeout(() => fetchElectionStatus1b(), 1500);
+    },
+    onError: (error) => {
+      showErrorToast(error);
+    },
+  });
 
   // Function to fetch election results for Vote 0
   const fetchElectionResults0 = async (autoCollapseOnLoad = false) => {
@@ -183,6 +222,50 @@ export default function VotingBooth() {
       // If election doesn't exist yet, auto-collapse on load
       if (autoCollapseOnLoad) {
         setVote0Collapsed(true);
+      }
+    }
+  };
+
+  // Function to fetch election status and vote count for Vote 1b (private vote)
+  const fetchElectionStatus1b = async (autoCollapseOnLoad = false) => {
+    if (!vote1bConfig) return;
+    
+    try {
+      const publicClient = createPublicClient({
+        chain: statusNetworkSepolia,
+        transport: http("https://public.sepolia.rpc.status.network"),
+      });
+
+      // Get election status
+      const election = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getElection",
+        args: [BigInt(vote1bConfig.electionId)],
+      });
+
+      const status = election.status === 1 ? "Open" : "Closed";
+      setElectionStatus1b(status);
+      
+      // Auto-collapse if closed or on initial load
+      if (autoCollapseOnLoad && status !== "Open") {
+        setVote1bCollapsed(true);
+      }
+
+      // Get total vote count (private votes don't show individual results)
+      const voteCount = await publicClient.readContract({
+        address: VOTING_CONTRACT_ADDRESS,
+        abi: VOTING_WORKSHOP_ABI,
+        functionName: "getVoteCount",
+        args: [BigInt(vote1bConfig.electionId)],
+      });
+
+      setTotalVotes1b(Number(voteCount));
+    } catch (error) {
+      console.error("Error fetching status for vote 1b:", error);
+      // If election doesn't exist yet, auto-collapse on load
+      if (autoCollapseOnLoad) {
+        setVote1bCollapsed(true);
       }
     }
   };
@@ -364,6 +447,21 @@ export default function VotingBooth() {
             await fetchElectionResults1a(true);
           }
           
+          // Check if user has voted in vote 1b (private vote)
+          if (vote1bConfig) {
+            const voted1b = await publicClient.readContract({
+              address: VOTING_CONTRACT_ADDRESS,
+              abi: VOTING_WORKSHOP_ABI,
+              functionName: "hasUserVoted",
+              args: [BigInt(vote1bConfig.electionId), walletAddress as `0x${string}`],
+            });
+            
+            setHasVoted1b(voted1b);
+            
+            // Fetch initial status for vote 1b (with auto-collapse on load)
+            await fetchElectionStatus1b(true);
+          }
+          
           setLoading(false);
         }
       } catch (error) {
@@ -374,7 +472,7 @@ export default function VotingBooth() {
 
     checkRegistrationAndVotes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, authenticated, user, router, vote0Config, vote1aConfig]);
+  }, [ready, authenticated, user, router, vote0Config, vote1aConfig, vote1bConfig]);
 
   // Auto-refresh results for Vote 0 every 5 seconds (only when Open)
   useEffect(() => {
