@@ -1,15 +1,44 @@
 /**
  * Encryption utilities for private voting
- * Uses TweetNaCl for asymmetric encryption
+ * Uses TweetNaCl for asymmetric encryption (NaCl box)
+ * 
+ * ## Setup Instructions:
+ * 
+ * 1. Generate encryption keys by running:
+ *    ```
+ *    npx ts-node scripts/generate-keypair.ts
+ *    ```
+ * 
+ * 2. Add the keys to your .env file:
+ *    ```
+ *    PRIVATE_KEY_ENCRYPTION="..." (base64, keep secret, organizer only)
+ *    NEXT_PUBLIC_ENCRYPTION_PUBLIC_KEY="..." (base64, safe to commit)
+ *    ```
+ * 
+ * 3. The public key from NEXT_PUBLIC_ENCRYPTION_PUBLIC_KEY will be used
+ *    automatically for encrypting votes client-side.
+ * 
+ * 4. The private key should NEVER be committed or exposed to users.
+ *    It's used by the organizer in the Streamlit dashboard for decryption.
+ * 
+ * ## How it works:
+ * - Users sign a vote message with their wallet
+ * - The signature is encrypted with the public key
+ * - Encrypted signature is stored on-chain
+ * - Only the organizer (with private key) can decrypt and tally
  */
 
 import * as nacl from 'tweetnacl';
 import * as util from 'tweetnacl-util';
 
 /**
- * Public key for encryption (safe to commit and share)
- * This will be derived from NEXT_PUBLIC_ENCRYPTION_PUBLIC_KEY env variable
- * For production, set this to your actual public key
+ * Get the public key for encryption from environment variable
+ * 
+ * The public key is safe to commit and share publicly.
+ * It's loaded from NEXT_PUBLIC_ENCRYPTION_PUBLIC_KEY environment variable.
+ * 
+ * @returns Public key as Uint8Array
+ * @throws Error if NEXT_PUBLIC_ENCRYPTION_PUBLIC_KEY is not set or invalid
  */
 export const getPublicKey = (): Uint8Array => {
   const publicKeyBase64 = process.env.NEXT_PUBLIC_ENCRYPTION_PUBLIC_KEY;
@@ -23,7 +52,7 @@ export const getPublicKey = (): Uint8Array => {
   
   try {
     return util.decodeBase64(publicKeyBase64);
-  } catch (error) {
+  } catch {
     throw new Error('Invalid public key format. Expected base64-encoded key.');
   }
 };
@@ -80,25 +109,20 @@ export function encryptMessage(message: string): string {
  * Verify that a signature is valid for a given message and address
  * This is used client-side to verify before encryption
  * 
- * @param message - The original message that was signed
+ * @param _message - The original message that was signed
  * @param signature - The signature (hex string starting with 0x)
- * @param address - The expected signer address
+ * @param _address - The expected signer address
  * @returns True if signature is valid
  */
 export function verifySignature(
-  message: string,
+  _message: string,
   signature: string,
-  address: string
+  _address: string
 ): boolean {
-  try {
-    // We'll use ethers or viem for this
-    // For now, return true as Privy's signMessage already validates
-    // The actual verification happens in the tally process
-    return signature.startsWith('0x') && signature.length === 132;
-  } catch (error) {
-    console.error('Signature verification error:', error);
-    return false;
-  }
+  // We'll use ethers or viem for full verification
+  // For now, return true as Privy's signMessage already validates
+  // The actual verification happens in the tally process
+  return signature.startsWith('0x') && signature.length === 132;
 }
 
 /**

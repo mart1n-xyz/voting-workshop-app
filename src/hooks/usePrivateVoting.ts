@@ -80,8 +80,8 @@ export function usePrivateVoting({
       // Step 3: Sign the message with user's wallet
       let signature: string;
       try {
-        const signResult = await signMessage(message);
-        signature = signResult;
+        const { signature: sig } = await signMessage({ message });
+        signature = sig;
       } catch (signError: any) {
         // User rejected signing
         if (signError.message?.includes('rejected') || signError.message?.includes('denied')) {

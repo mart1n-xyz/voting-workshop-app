@@ -89,13 +89,6 @@ const VOTING_WORKSHOP_ABI = [
     stateMutability: "view",
     type: "function",
   },
-  {
-    inputs: [{ internalType: "uint256", name: "electionId", type: "uint256" }],
-    name: "getVoteCount",
-    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
-    stateMutability: "view",
-    type: "function",
-  },
 ] as const;
 
 export default function VotingBooth() {
@@ -103,7 +96,6 @@ export default function VotingBooth() {
   const { sendTransaction } = useSendTransaction();
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
-  const [userAddress, setUserAddress] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [task1Complete, setTask1Complete] = useState(false);
   const [task1Collapsed, setTask1Collapsed] = useState(false);
@@ -134,6 +126,11 @@ export default function VotingBooth() {
   const [assignedDistrict, setAssignedDistrict] = useState<string | null>(null);
   const [votersByChoice1a, setVotersByChoice1a] = useState<Record<number, number[]>>({});
   
+  // Vote 1a state
+  const [assignedDistrict1a, setAssignedDistrict1a] = useState<string | null>(null);
+  // Vote 1b has its own district assignment (independent from 1a)
+  const [assignedDistrict1b, setAssignedDistrict1b] = useState<string | null>(null);
+  
   const vote0Config = getVoteConfig("vote0");
   const vote1aConfig = getVoteConfig("vote1a");
   const vote1bConfig = getVoteConfig("vote1b");
@@ -142,7 +139,6 @@ export default function VotingBooth() {
   const [selectedOption1b, setSelectedOption1b] = useState<number | null>(null);
   const [hasVoted1b, setHasVoted1b] = useState(false);
   const [electionStatus1b, setElectionStatus1b] = useState<"Open" | "Closed" | null>(null);
-  const [totalVotes1b, setTotalVotes1b] = useState(0);
   
   // Private voting hook for vote 1b
   const { submitPrivateVote: submitVote1b, isSubmitting: isSubmitting1b } = usePrivateVoting({
@@ -251,16 +247,6 @@ export default function VotingBooth() {
       if (autoCollapseOnLoad && status !== "Open") {
         setVote1bCollapsed(true);
       }
-
-      // Get total vote count (private votes don't show individual results)
-      const voteCount = await publicClient.readContract({
-        address: VOTING_CONTRACT_ADDRESS,
-        abi: VOTING_WORKSHOP_ABI,
-        functionName: "getVoteCount",
-        args: [BigInt(vote1bConfig.electionId)],
-      });
-
-      setTotalVotes1b(Number(voteCount));
     } catch (error) {
       console.error("Error fetching status for vote 1b:", error);
       // If election doesn't exist yet, auto-collapse on load
@@ -370,11 +356,13 @@ export default function VotingBooth() {
           router.push("/");
         } else {
           setUserId(id.toString());
-          setUserAddress(walletAddress);
           
-          // Assign district for vote 1a
-          const district = getAssignedDistrict(walletAddress);
-          setAssignedDistrict(district);
+          // Assign districts for vote 1a and 1b (different assignments)
+          const district1a = getAssignedDistrict(walletAddress, "vote1a");
+          const district1b = getAssignedDistrict(walletAddress, "vote1b");
+          setAssignedDistrict(district1a); // Keep for backward compatibility
+          setAssignedDistrict1a(district1a);
+          setAssignedDistrict1b(district1b);
           
           // Mark Task 1 as complete (assume user has seen their ID after registration)
           setTask1Complete(true);
@@ -498,6 +486,18 @@ export default function VotingBooth() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vote1aConfig, task1Complete, hasVoted0, electionStatus1a]);
 
+  // Check if Vote 1b election closed (stop checking once closed)
+  useEffect(() => {
+    if (!vote1bConfig || !task1Complete || !hasVoted1a || electionStatus1b === "Closed") return;
+
+    const intervalId = setInterval(() => {
+      fetchElectionStatus1b();
+    }, 5000);
+
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vote1bConfig, task1Complete, hasVoted1a, electionStatus1b]);
+
   const handleRefreshResults0 = async () => {
     setIsRefreshingResults0(true);
     await fetchElectionResults0();
@@ -578,6 +578,21 @@ export default function VotingBooth() {
     }
   };
 
+  const handleVoteSubmit1b = async () => {
+    if (selectedOption1b === null) {
+      showErrorToast("Please select an option");
+      return;
+    }
+
+    try {
+      await submitVote1b(selectedOption1b);
+      // Success handling is done in the hook's onSuccess callback
+    } catch (error: any) {
+      // Error handling is done in the hook's onError callback
+      console.error("Private vote submission error:", error);
+    }
+  };
+
   if (!ready || loading) {
     return <FullScreenLoader />;
   }
@@ -587,7 +602,7 @@ export default function VotingBooth() {
     return <FullScreenLoader />;
   }
 
-  if (isSubmitting0 || isSubmitting1a) {
+  if (isSubmitting0 || isSubmitting1a || isSubmitting1b) {
     return <FullScreenLoader message="Submitting your vote..." />;
   }
 
@@ -978,7 +993,7 @@ export default function VotingBooth() {
                         📍 You live in: <span className="text-lg font-bold">District {assignedDistrict}</span>
                       </p>
                       <p className="text-xs text-purple-700 text-center mt-1">
-                        You'll benefit if funds are allocated to your district
+                        You&apos;ll benefit if funds are allocated to your district
                       </p>
                     </div>
                   )}
@@ -1228,6 +1243,170 @@ export default function VotingBooth() {
                         })}
                       </div>
                     </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Task 4: Vote 1b - Private Coordination */}
+          {vote1bConfig && (
+            <div className={`bg-white rounded-2xl border-2 overflow-hidden shadow-sm transition-all duration-300 ${
+              hasVoted1a ? "border-gray-200" : "border-gray-100 opacity-50"
+            }`}>
+              <div className="flex items-center gap-4 px-6 py-4 bg-gray-50 border-b-2 border-gray-200">
+                {hasVoted1b ? (
+                  <CheckCircleIcon className="w-7 h-7 text-green-600" />
+                ) : (
+                  <div className="w-7 h-7 rounded-full border-2 border-gray-400 flex items-center justify-center bg-white">
+                    <span className="text-sm font-bold text-gray-600">4</span>
+                  </div>
+                )}
+                <div className="flex-1">
+                  <h2 className="text-xl font-bold text-gray-900">
+                    {vote1bConfig.title}
+                  </h2>
+                  {!hasVoted1a && (
+                    <p className="text-sm text-gray-500">Complete previous task to unlock</p>
+                  )}
+                  {hasVoted1b && electionStatus1b === "Open" && (
+                    <p className="text-sm text-green-600 font-medium">Voted</p>
+                  )}
+                  {electionStatus1b === "Closed" && (
+                    <p className="text-sm text-blue-600 font-medium">Closed</p>
+                  )}
+                  {electionStatus1b === null && hasVoted1a && (
+                    <p className="text-sm text-amber-600 font-medium">Waiting to open...</p>
+                  )}
+                </div>
+                {hasVoted1a && (
+                  <button
+                    onClick={() => setVote1bCollapsed(!vote1bCollapsed)}
+                    className="text-sm text-gray-500 hover:text-gray-700 underline"
+                  >
+                    {vote1bCollapsed ? "Expand" : "Collapse"}
+                  </button>
+                )}
+              </div>
+
+              {hasVoted1a && !vote1bCollapsed && (
+                <div className="p-8 space-y-6">
+                  {/* Private Voting Badge */}
+                  <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
+                    <p className="text-sm font-semibold text-purple-900 text-center flex items-center justify-center gap-2">
+                      <span>🔒</span>
+                      <span>Private Voting - Your vote is encrypted and secret</span>
+                    </p>
+                    <p className="text-xs text-purple-700 text-center mt-1">
+                      Results will be revealed by the organizer after voting closes
+                    </p>
+                  </div>
+
+                  {/* District Assignment Banner for Vote 1b */}
+                  {assignedDistrict1b && (
+                    <div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-4">
+                      <p className="text-sm font-semibold text-indigo-900 text-center">
+                        📍 You have moved to: <span className="text-lg font-bold">District {assignedDistrict1b}</span>
+                      </p>
+                      <p className="text-xs text-indigo-700 text-center mt-1">
+                        You&apos;ll benefit if funds are allocated to your new district
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-base text-gray-700 mb-3 leading-relaxed whitespace-pre-line">
+                        {vote1bConfig.context}
+                      </p>
+                      <p className="text-lg font-bold text-gray-900 mt-4">
+                        {vote1bConfig.question}
+                      </p>
+                    </div>
+
+                    {/* Waiting for Election to Open */}
+                    {electionStatus1b === null && (
+                      <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-6 text-center">
+                        <p className="text-lg font-semibold text-amber-900 mb-2">
+                          ⏳ Waiting for Vote to Open
+                        </p>
+                        <p className="text-sm text-amber-700">
+                          The organizer will open this vote when ready. Please wait.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Voting Section */}
+                    {!hasVoted1b && electionStatus1b === "Open" && (
+                      <>
+                        <div className="pt-2">
+                          <p className="text-sm font-semibold text-gray-700 mb-3">Cast Your Private Vote:</p>
+                          <div className="space-y-3">
+                            {vote1bConfig.options.map((option) => {
+                              const isHomeDistrict = assignedDistrict1b && option.text.includes(assignedDistrict1b);
+                              return (
+                                <button
+                                  key={option.id}
+                                  onClick={() => setSelectedOption1b(option.id)}
+                                  className={`w-full text-left px-6 py-4 border-2 rounded-xl transition-all duration-200 font-medium relative ${
+                                    selectedOption1b === option.id
+                                      ? "border-gray-900 bg-gray-900 text-white"
+                                      : isHomeDistrict
+                                      ? "border-indigo-300 bg-indigo-50 text-gray-900 hover:border-indigo-400"
+                                      : "border-gray-200 bg-gray-50 text-gray-900 hover:border-gray-400 hover:bg-white"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span>{option.text}</span>
+                                    {isHomeDistrict && selectedOption1b !== option.id && (
+                                      <span className="text-xs text-indigo-600 font-semibold">🏠 Your New District</span>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={handleVoteSubmit1b}
+                          disabled={selectedOption1b === null || isSubmitting1b}
+                          className="w-full bg-gray-900 text-white px-8 py-4 rounded-xl text-lg font-semibold transition-all duration-300 hover:bg-gray-800 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSubmitting1b ? "Encrypting and submitting..." : "Submit Private Vote"}
+                        </button>
+
+                        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                          <p className="text-xs text-blue-800">
+                            <strong>How it works:</strong> You&apos;ll be asked to sign a message with your wallet. 
+                            This signature will be encrypted and submitted to the blockchain. No one can see your vote until the organizer decrypts and tallies after voting closes.
+                          </p>
+                        </div>
+                      </>
+                    )}
+
+                    {/* Vote Confirmation */}
+                    {hasVoted1b && (
+                      <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+                        <p className="text-sm font-semibold text-green-800 text-center">
+                          ✓ Your encrypted vote has been recorded on the blockchain
+                        </p>
+                        <p className="text-xs text-green-700 text-center mt-1">
+                          Results will be revealed by the organizer after voting closes
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Show status when voting is closed */}
+                    {electionStatus1b === "Closed" && (
+                      <div className="border-t-2 border-gray-200 pt-6 mt-6">
+                        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                          <p className="text-sm text-blue-800 font-medium text-center">
+                            🔐 Voting is closed. The organizer will present the results.
+                          </p>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>

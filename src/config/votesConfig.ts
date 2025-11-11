@@ -82,9 +82,11 @@ export const VOTES_CONFIG: Record<string, VoteConfig> = {
     voteKey: "vote1b",
     electionId: 3,
     type: "private",
-    title: "District Funding (Private)",
+    title: "Vote 1b: Private Coordination",
     question: "Which district should receive the programming education grant?",
-    context: "Same decision as before, but with private voting. You have recently moved to a different district.",
+    context: "The co-op has received another grant for programming education. However, you have recently moved to a different district. This time, votes are private—no one can see your choice until the organizer reveals results after voting closes.",
+    requiresDistrictAssignment: true,
+    coordinationThreshold: 0.6,
     options: [
       { id: 1, text: "District A" },
       { id: 2, text: "District B" },
@@ -196,14 +198,19 @@ export function getVoteByElectionId(electionId: number): VoteConfig | undefined 
 /**
  * Get assigned district for a wallet address (deterministic)
  * Uses simple hash to assign districts A, B, C, or D with equal probability
+ * 
+ * @param walletAddress - The wallet address to assign a district to
+ * @param seed - Optional seed for different assignments (e.g., "vote1a", "vote1b")
+ * @returns District letter: "A", "B", "C", or "D"
  */
-export function getAssignedDistrict(walletAddress: string): string {
-  // Simple hash: sum of character codes
+export function getAssignedDistrict(walletAddress: string, seed: string = "default"): string {
+  // Simple hash: sum of character codes with seed
   let hash = 0;
   const normalized = walletAddress.toLowerCase();
+  const input = normalized + seed; // Combine address and seed for different assignments
   
-  for (let i = 0; i < normalized.length; i++) {
-    hash = (hash * 31 + normalized.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
   }
   
   // Map to districts A, B, C, D (0-3)
