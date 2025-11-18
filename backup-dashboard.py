@@ -98,14 +98,109 @@ DEFAULT_RPC_URL = "https://public.sepolia.rpc.status.network"
 # Default decryption key (Base64 encoded)
 DEFAULT_DECRYPTION_KEY = "UgsmFEqNQrYE32riH1Ph0mBV7g2IVQ1FIXPEbTyb0zY="
 
-# Vote options for verification (must match what users signed)
-# Common options - can be customized per election
-DEFAULT_VOTE_OPTIONS = [
-    "I vote for District A",
-    "I vote for District B",
-    "I vote for District C",
-    "I vote for District D",
-]
+# Vote configuration (matches votesConfig.ts)
+VOTE_CONFIGS = {
+    "vote0": {
+        "voteKey": "vote0",
+        "electionId": 1,
+        "type": "public",
+        "title": "Training Ground",
+        "options": [
+            {"id": 1, "text": "Feeling Messi-level productive today"},
+            {"id": 2, "text": "Surviving on empanadas and wine"},
+            {"id": 3, "text": "Could use a siesta."},
+            {"id": 4, "text": "Like the Buenos Aires weather - a bit unpredictable"},
+        ],
+    },
+    "vote1a": {
+        "voteKey": "vote1a",
+        "electionId": 2,
+        "type": "public",
+        "title": "Vote 1a: Coordination",
+        "options": [
+            {"id": 1, "text": "District A"},
+            {"id": 2, "text": "District B"},
+            {"id": 3, "text": "District C"},
+            {"id": 4, "text": "District D"},
+        ],
+    },
+    "vote1b": {
+        "voteKey": "vote1b",
+        "electionId": 3,
+        "type": "private",
+        "title": "Vote 1b: Private Coordination",
+        "options": [
+            {"id": 1, "text": "District A"},
+            {"id": 2, "text": "District B"},
+            {"id": 3, "text": "District C"},
+            {"id": 4, "text": "District D"},
+        ],
+    },
+    "vote2a": {
+        "voteKey": "vote2a",
+        "electionId": 4,
+        "type": "public",
+        "title": "Vote 2a: Strategic Initiative - Round 1 (Public)",
+        "options": [
+            {"id": 1, "text": "A – Citywide Campaign (Marketing)"},
+            {"id": 2, "text": "B – Process Upgrade (Operations)"},
+            {"id": 3, "text": "C – Community Program (Community)"},
+            {"id": 4, "text": "D – Shared Hub (Everyone)"},
+        ],
+    },
+    "vote2b": {
+        "voteKey": "vote2b",
+        "electionId": 5,
+        "type": "public",
+        "title": "Vote 2b: Strategic Initiative - Round 2 (Public)",
+        "options": [
+            {"id": 1, "text": "A – Citywide Campaign (Marketing)"},
+            {"id": 2, "text": "B – Process Upgrade (Operations)"},
+            {"id": 3, "text": "C – Community Program (Community)"},
+            {"id": 4, "text": "D – Shared Hub (Everyone)"},
+        ],
+    },
+    "vote2c": {
+        "voteKey": "vote2c",
+        "electionId": 6,
+        "type": "private",
+        "title": "Vote 2c: Strategic Initiative - Round 3 (Private)",
+        "options": [
+            {"id": 1, "text": "A – Citywide Campaign (Marketing)"},
+            {"id": 2, "text": "B – Process Upgrade (Operations)"},
+            {"id": 3, "text": "C – Community Program (Community)"},
+            {"id": 4, "text": "D – Shared Hub (Everyone)"},
+        ],
+    },
+    "vote2d": {
+        "voteKey": "vote2d",
+        "electionId": 7,
+        "type": "private",
+        "title": "Vote 2d: Strategic Initiative - Round 4 (Final, Private)",
+        "options": [
+            {"id": 1, "text": "A – Citywide Campaign (Marketing)"},
+            {"id": 2, "text": "B – Process Upgrade (Operations)"},
+            {"id": 3, "text": "C – Community Program (Community)"},
+            {"id": 4, "text": "D – Shared Hub (Everyone, bonus if ≥50%)"},
+        ],
+    },
+    "vote3": {
+        "voteKey": "vote3",
+        "electionId": 8,
+        "type": "public",
+        "title": "Vote 3: Merit vs Luck",
+        "options": [
+            {"id": 1, "text": "Award to current 3rd place participant"},
+            {"id": 2, "text": "Random draw among all participants"},
+        ],
+    },
+}
+
+# Generate vote options for signature verification (for private votes)
+# These are the messages users sign: "I vote for [option text]"
+def get_vote_signature_options(vote_config):
+    """Generate signature verification options from vote config"""
+    return [f"I vote for {opt['text']}" for opt in vote_config['options']]
 
 # Decryption functions
 def decrypt_signature(encrypted_base64, private_key_base64):
@@ -321,31 +416,29 @@ else:
     # Main content area
     st.header("📊 Election Information")
     
-    # Election ID input
-    col_input1, col_input2, col_input3 = st.columns([2, 2, 1])
+    # Vote selection
+    col_input1, col_input2 = st.columns([3, 1])
     
     with col_input1:
-        election_id = st.number_input(
-            "Enter Election ID",
-            min_value=0,
-            step=1,
-            value=0,
-            key="election_id_input",
-            help="Enter the election number/ID to view its information"
+        # Create vote selection dropdown
+        vote_options_list = [f"{config['title']} (ID: {config['electionId']})" for config in VOTE_CONFIGS.values()]
+        vote_keys_list = list(VOTE_CONFIGS.keys())
+        
+        selected_vote_index = st.selectbox(
+            "Select Vote",
+            options=range(len(vote_options_list)),
+            format_func=lambda x: vote_options_list[x],
+            key="vote_selection",
+            help="Select a vote to view its information and results"
         )
+        
+        selected_vote_key = vote_keys_list[selected_vote_index]
+        selected_vote_config = VOTE_CONFIGS[selected_vote_key]
+        
+        # Display vote info
+        st.caption(f"**Type:** {selected_vote_config['type'].title()} | **Election ID:** {selected_vote_config['electionId']} | **Options:** {len(selected_vote_config['options'])}")
     
     with col_input2:
-        num_choices = st.number_input(
-            "Number of Choices/Options",
-            min_value=2,
-            max_value=10,
-            step=1,
-            value=4,
-            key="num_choices_input",
-            help="How many options/choices does this election have?"
-        )
-    
-    with col_input3:
         st.markdown("<br>", unsafe_allow_html=True)  # Spacer for alignment
         get_info_button = st.button("🔍 Get Info", type="primary", width='stretch')
     
@@ -355,14 +448,16 @@ else:
     with results_container:
         if get_info_button:
             # Store the query in session state
-            st.session_state.current_election_id = election_id
-            st.session_state.current_num_choices = num_choices
+            st.session_state.current_vote_key = selected_vote_key
             st.session_state.show_results = True
         
         # Display results if we have queried before
         if st.session_state.get('show_results', False):
-            query_election_id = st.session_state.get('current_election_id', 0)
-            query_num_choices = st.session_state.get('current_num_choices', 4)
+            query_vote_key = st.session_state.get('current_vote_key', vote_keys_list[0])
+            query_vote_config = VOTE_CONFIGS.get(query_vote_key, selected_vote_config)
+            query_election_id = query_vote_config['electionId']
+            query_options = query_vote_config['options']
+            query_num_choices = len(query_options)
             
             try:
                 contract = st.session_state.contract
@@ -374,7 +469,7 @@ else:
                     is_public = election[2]  # Index 2 is isPublic
                 
                 # Display election information
-                st.success(f"✅ Election #{query_election_id} found!")
+                st.success(f"✅ {query_vote_config['title']} (Election #{query_election_id}) found!")
                 
                 col1, col2 = st.columns(2)
                 
@@ -426,8 +521,8 @@ else:
                             user_ids = []
                             choices = []
                         
-                        # Create option labels
-                        option_labels = [f"Option {i+1}" for i in range(query_num_choices)]
+                        # Create option labels from vote config
+                        option_labels = [opt['text'] for opt in query_options]
                         
                         # Create results dataframe
                         df = pd.DataFrame({
@@ -502,10 +597,18 @@ else:
                     st.subheader("👥 Individual Votes")
                     
                     if len(user_ids) > 0:
-                        # Create votes dataframe
+                        # Create votes dataframe with actual option names
+                        choice_names = []
+                        for choice in choices:
+                            choice_idx = int(choice) - 1  # Convert to 0-based index
+                            if 0 <= choice_idx < len(query_options):
+                                choice_names.append(query_options[choice_idx]['text'])
+                            else:
+                                choice_names.append(f"Option {int(choice)}")
+                        
                         votes_df = pd.DataFrame({
                             'User ID': [int(uid) for uid in user_ids],
-                            'Choice': [f"Option {int(choice)}" for choice in choices]
+                            'Choice': choice_names
                         })
                         
                         # Sort by User ID for better readability
@@ -537,15 +640,18 @@ else:
                             help="Base64 encoded private key for decryption"
                         )
                         
-                        # Vote options input
-                        st.markdown("**Vote Options (one per line, must match what users signed):**")
-                        vote_options_text = st.text_area(
+                        # Generate signature options from vote config
+                        signature_options = get_vote_signature_options(query_vote_config)
+                        
+                        st.markdown("**Signature Options (auto-generated from vote config):**")
+                        st.text_area(
                             "Options",
-                            value="\n".join(DEFAULT_VOTE_OPTIONS),
+                            value="\n".join(signature_options),
                             height=150,
-                            help="Enter vote options, one per line. Must exactly match what users signed."
+                            disabled=True,
+                            help="These are the signature messages that users signed. Auto-generated from vote configuration."
                         )
-                        vote_options = [opt.strip() for opt in vote_options_text.split("\n") if opt.strip()]
+                        vote_options = signature_options
                     
                     with st.spinner("Loading encrypted votes..."):
                         try:
@@ -608,9 +714,16 @@ else:
                                                 )
                                                 
                                                 if result['vote']:
+                                                    # Get the actual option text from vote config
+                                                    option_idx = result['vote']['optionIndex']
+                                                    if 0 <= option_idx < len(query_options):
+                                                        option_text = query_options[option_idx]['text']
+                                                    else:
+                                                        option_text = result['vote']['optionText']
+                                                    
                                                     decrypted_votes.append({
                                                         'User ID': int(user_id),
-                                                        'Choice': f"Option {result['vote']['choice']}",
+                                                        'Choice': option_text,
                                                         'Vote Text': result['vote']['optionText']
                                                     })
                                                 else:
