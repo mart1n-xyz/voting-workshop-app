@@ -10,12 +10,10 @@ from eth_account import Account
 from eth_account.messages import encode_defunct
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 import time
 from datetime import datetime
 import base64
 import nacl.public
-import nacl.utils
 
 # Page configuration
 st.set_page_config(
@@ -314,7 +312,7 @@ def verify_vote_signature(signature, voter_address, options):
                         'optionText': message,
                         'choice': i + 1  # 1-indexed for display
                     }
-            except:
+            except Exception:
                 # This option doesn't match, continue
                 continue
         
@@ -358,13 +356,27 @@ if 'last_refresh' not in st.session_state:
     st.session_state.last_refresh = None
 if 'decryption_key' not in st.session_state:
     st.session_state.decryption_key = None
+if 'decrypted_votes_cache' not in st.session_state:
+    st.session_state.decrypted_votes_cache = {}  # election_id -> {user_id: vote_data}
+if 'public_votes_cache' not in st.session_state:
+    st.session_state.public_votes_cache = {}  # election_id -> results data
 
 def initialize_web3(rpc_url: str, private_key: str, decryption_key: str = None):
     """Initialize Web3 connection and account"""
     try:
         with st.spinner("Connecting to blockchain..."):
-            # Connect to blockchain
-            w3 = Web3(Web3.HTTPProvider(rpc_url))
+            # Connect to blockchain with timeout settings
+            # Set request timeout to 5 seconds for faster failures
+            from web3.providers import HTTPProvider
+            from web3 import Web3 as Web3Class
+            
+            provider = HTTPProvider(
+                rpc_url,
+                request_kwargs={
+                    'timeout': 5  # 5 second timeout per request
+                }
+            )
+            w3 = Web3Class(provider)
             
             # Add POA middleware for compatibility
             try:
@@ -408,7 +420,7 @@ def get_user_address_from_id(contract, user_id):
         # Note: We need to add this to the ABI if not present
         # For now, we'll need to track this differently
         return None
-    except:
+    except Exception:
         return None
 
 def fetch_private_votes(w3, contract_address, election_id, from_block=0):
@@ -514,7 +526,7 @@ if not st.session_state.account:
         # Try to load from secrets first
         try:
             default_rpc = st.secrets.get("RPC_ENDPOINT", DEFAULT_RPC_URL)
-        except:
+        except Exception:
             default_rpc = DEFAULT_RPC_URL
         
         rpc_url = st.text_input(
@@ -591,11 +603,10 @@ if st.session_state.web3 and st.session_state.contract:
                     try:
                         vote_count = contract.functions.getVoteCount(eid).call()
                         total_votes_cast += vote_count
-                    except:
+                    except Exception:
                         pass
-                except:
+                except Exception:
                     pass
-        
         # Create 4-column layout with modern metrics
         col1, col2, col3, col4 = st.columns(4)
         
@@ -740,7 +751,7 @@ if st.session_state.web3 and st.session_state.contract:
             else:
                 # For private votes, use getVoteCount
                 vote_count = contract.functions.getVoteCount(election_id).call()
-        except:
+        except Exception:
             vote_count = 0
             status = 'Not Created'
         
@@ -749,182 +760,295 @@ if st.session_state.web3 and st.session_state.contract:
             with st.expander(f"**Election {election_id}**: {config['name']}", expanded=(vote_count > 0 and status == 'Closed')):
                 
                 if config['type'] == 'public' and vote_count > 0:
-                    # Fetch and display public vote results
-                    results = contract.functions.getElectionResults(election_id, config['options']).call()
+                    # Check if we have cached results for this election
+                    election_cache = st.session_state.public_votes_cache.get(election_id, None)
+                    has_cached_results = election_cache is not None
                     
-                    # Get all votes to show voter IDs per choice
-                    all_votes = contract.functions.getAllPublicVotes(election_id).call()
-                    user_ids = all_votes[0]
-                    choices = all_votes[1]
+                    # Add refresh button
+                    col_btn1, col_btn2 = st.columns([1, 4])
+                    with col_btn1:
+                        button_label = "🔄 Refresh" if has_cached_results else "📊 Load Results"
+                        load_button = st.button(button_label, key=f"load_public_{election_id}", type="primary", use_container_width=True)
                     
-                    # Group voters by their choice
-                    voters_by_choice = {}
-                    for user_id, choice in zip(user_ids, choices):
-                        if choice not in voters_by_choice:
-                            voters_by_choice[choice] = []
-                        voters_by_choice[choice].append(int(user_id))
-                    
-                    # Display results as bar chart
-                    option_labels = []
-                    if config['options'] == 4:
-                        if "District" in config['name'] or "Coordination" in config['name']:
-                            option_labels = ["District A", "District B", "District C", "District D"]
-                        else:
-                            option_labels = ["Option A", "Option B", "Option C", "Option D"]
-                    elif config['options'] == 2:
-                        option_labels = ["Award to 3rd place", "Random draw"]
-                    else:
-                        option_labels = [f"Option {i+1}" for i in range(config['options'])]
-                    
-                    # Create results dataframe
-                    df = pd.DataFrame({
-                        'Option': option_labels,
-                        'Votes': list(results),
-                        'VoterIDs': [voters_by_choice.get(i+1, []) for i in range(len(option_labels))]
-                    })
-                    
-                    # Calculate percentages
-                    df['Percentage'] = (df['Votes'] / vote_count * 100).round(1)
-                    
-                    # Find winner
-                    max_votes = df['Votes'].max()
-                    winners = df[df['Votes'] == max_votes]['Option'].tolist()
-                    
-                    # Create modern visualization with Plotly
-                    col1, col2 = st.columns([2, 1])
-                    
-                    with col1:
-                        # Create horizontal bar chart with Plotly
-                        colors = ['#ff6b6b' if v == max_votes else '#4ecdc4' for v in df['Votes']]
-                        
-                        fig = go.Figure(data=[
-                            go.Bar(
-                                y=df['Option'],
-                                x=df['Votes'],
-                                orientation='h',
-                                marker=dict(
-                                    color=colors,
-                                    line=dict(color='rgba(0,0,0,0.1)', width=1)
-                                ),
-                                text=[f"{v} ({p:.1f}%)" for v, p in zip(df['Votes'], df['Percentage'])],
-                                textposition='outside',
-                                hovertemplate='<b>%{y}</b><br>Votes: %{x}<br><extra></extra>'
-                            )
-                        ])
-                        
-                        fig.update_layout(
-                            title=dict(
-                                text=f"Results: {config['name']}",
-                                font=dict(size=16, color='#333')
-                            ),
-                            xaxis_title="Number of Votes",
-                            yaxis_title="",
-                            height=max(300, len(option_labels) * 80),
-                            margin=dict(l=20, r=100, t=60, b=40),
-                            plot_bgcolor='rgba(0,0,0,0)',
-                            paper_bgcolor='rgba(0,0,0,0)',
-                            font=dict(size=12),
-                            xaxis=dict(
-                                showgrid=True,
-                                gridcolor='rgba(0,0,0,0.05)'
-                            ),
-                            yaxis=dict(
-                                showgrid=False,
-                                categoryorder='total ascending'
-                            )
-                        )
-                        
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                    with col2:
-                        # Winner announcement
-                        st.markdown("### 🏆 Result")
-                        if len(winners) == 1:
-                            st.success(f"**{winners[0]}**")
-                            st.metric("Winning Votes", max_votes)
-                            st.metric("Margin", f"{(df['Votes'].max() / vote_count * 100):.1f}%")
-                        else:
-                            st.info(f"**Tie**")
-                            st.write(f"{', '.join(winners)}")
-                            st.metric("Tied Votes", max_votes)
-                        
-                        st.divider()
-                        st.metric("Total Votes", vote_count)
-                        st.metric("Turnout Rate", f"{(vote_count / st.session_state.contract.functions.getTotalRegistered().call() * 100):.1f}%" if vote_count > 0 else "0%")
-                    
-                    # Detailed breakdown in collapsible section
-                    with st.expander("📋 Detailed Voter Breakdown", expanded=False):
-                        for i, row in df.iterrows():
-                            label = row['Option']
-                            votes = row['Votes']
-                            percentage = row['Percentage']
-                            voter_ids = row['VoterIDs']
-                            
-                            # Create a nice card for each option
-                            st.markdown(f"""
-                            <div style="padding: 0.75rem; border-radius: 0.5rem; background-color: #f8f9fa; margin-bottom: 0.5rem; border-left: 4px solid {'#ff6b6b' if votes == max_votes else '#4ecdc4'};">
-                                <div style="display: flex; justify-content: space-between; align-items: center;">
-                                    <div style="font-weight: 600; font-size: 1rem;">{label}</div>
-                                    <div style="font-weight: 500; color: #6c757d;">{votes} votes ({percentage:.1f}%)</div>
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                            
-                            if voter_ids:
-                                voter_ids_str = ", ".join([f"#{vid}" for vid in sorted(voter_ids)])
-                                st.caption(f"Voters: {voter_ids_str}")
+                    with col_btn2:
+                        if has_cached_results:
+                            cached_count = election_cache['vote_count']
+                            if cached_count < vote_count:
+                                st.caption(f"Showing {cached_count} votes (click Refresh - {vote_count - cached_count} new votes available)")
                             else:
-                                st.caption("No votes")
+                                st.caption(f"Showing {cached_count} votes (up to date)")
+                        else:
+                            st.caption(f"{vote_count} votes ready to load")
+                    
+                    # Load/refresh data when button is clicked
+                    if load_button:
+                        with st.spinner("Loading results..."):
+                            # Fetch and display public vote results
+                            results = contract.functions.getElectionResults(election_id, config['options']).call()
                             
-                            st.write("")
+                            # Get all votes to show voter IDs per choice
+                            all_votes = contract.functions.getAllPublicVotes(election_id).call()
+                            user_ids = all_votes[0]
+                            choices = all_votes[1]
+                            
+                            # Group voters by their choice
+                            voters_by_choice = {}
+                            for user_id, choice in zip(user_ids, choices):
+                                if choice not in voters_by_choice:
+                                    voters_by_choice[choice] = []
+                                voters_by_choice[choice].append(int(user_id))
+                            
+                            # Cache the results
+                            st.session_state.public_votes_cache[election_id] = {
+                                'results': list(results),
+                                'voters_by_choice': voters_by_choice,
+                                'vote_count': vote_count
+                            }
+                            election_cache = st.session_state.public_votes_cache[election_id]
+                            has_cached_results = True
+                            st.success("✅ Results loaded!")
+                            time.sleep(0.3)
+                    
+                    # Display results if we have cached data
+                    if has_cached_results:
+                        results = election_cache['results']
+                        voters_by_choice = election_cache['voters_by_choice']
+                        cached_vote_count = election_cache['vote_count']
+                        
+                        # Display results as bar chart
+                        option_labels = []
+                        if config['options'] == 4:
+                            if "District" in config['name'] or "Coordination" in config['name']:
+                                option_labels = ["District A", "District B", "District C", "District D"]
+                            else:
+                                option_labels = ["Option A", "Option B", "Option C", "Option D"]
+                        elif config['options'] == 2:
+                            option_labels = ["Award to 3rd place", "Random draw"]
+                        else:
+                            option_labels = [f"Option {i+1}" for i in range(config['options'])]
+                        
+                        # Create results dataframe
+                        df = pd.DataFrame({
+                            'Option': option_labels,
+                            'Votes': list(results),
+                            'VoterIDs': [voters_by_choice.get(i+1, []) for i in range(len(option_labels))]
+                        })
+                        
+                        # Calculate percentages
+                        df['Percentage'] = (df['Votes'] / cached_vote_count * 100).round(1) if cached_vote_count > 0 else 0
+                        
+                        # Find winner
+                        max_votes = df['Votes'].max()
+                        winners = df[df['Votes'] == max_votes]['Option'].tolist()
+                        
+                        # Create modern visualization with Plotly
+                        col1, col2 = st.columns([2, 1])
+                        
+                        with col1:
+                            # Create horizontal bar chart with Plotly
+                            colors = ['#ff6b6b' if v == max_votes else '#4ecdc4' for v in df['Votes']]
+                            
+                            fig = go.Figure(data=[
+                                go.Bar(
+                                    y=df['Option'],
+                                    x=df['Votes'],
+                                    orientation='h',
+                                    marker=dict(
+                                        color=colors,
+                                        line=dict(color='rgba(0,0,0,0.1)', width=1)
+                                    ),
+                                    text=[f"{v} ({p:.1f}%)" for v, p in zip(df['Votes'], df['Percentage'])],
+                                    textposition='outside',
+                                    hovertemplate='<b>%{y}</b><br>Votes: %{x}<br><extra></extra>'
+                                )
+                            ])
+                            
+                            fig.update_layout(
+                                title=dict(
+                                    text=f"Results: {config['name']}",
+                                    font=dict(size=16, color='#333')
+                                ),
+                                xaxis_title="Number of Votes",
+                                yaxis_title="",
+                                height=max(300, len(option_labels) * 80),
+                                margin=dict(l=20, r=100, t=60, b=40),
+                                plot_bgcolor='rgba(0,0,0,0)',
+                                paper_bgcolor='rgba(0,0,0,0)',
+                                font=dict(size=12),
+                                xaxis=dict(
+                                    showgrid=True,
+                                    gridcolor='rgba(0,0,0,0.05)'
+                                ),
+                                yaxis=dict(
+                                    showgrid=False,
+                                    categoryorder='total ascending'
+                                )
+                            )
+                            
+                            st.plotly_chart(fig, use_container_width=True)
+                        
+                        with col2:
+                            # Winner announcement
+                            st.markdown("### 🏆 Result")
+                            if len(winners) == 1:
+                                st.success(f"**{winners[0]}**")
+                                st.metric("Winning Votes", max_votes)
+                                st.metric("Margin", f"{(df['Votes'].max() / cached_vote_count * 100):.1f}%" if cached_vote_count > 0 else "0%")
+                            else:
+                                st.info(f"**Tie**")
+                                st.write(f"{', '.join(winners)}")
+                                st.metric("Tied Votes", max_votes)
+                            
+                            st.divider()
+                            st.metric("Total Votes", cached_vote_count)
+                            total_registered = st.session_state.contract.functions.getTotalRegistered().call()
+                            st.metric("Turnout Rate", f"{(cached_vote_count / total_registered * 100):.1f}%" if cached_vote_count > 0 and total_registered > 0 else "0%")
+                        
+                        # Detailed breakdown in collapsible section
+                        with st.expander("📋 Detailed Voter Breakdown", expanded=False):
+                            for i, row in df.iterrows():
+                                label = row['Option']
+                                votes = row['Votes']
+                                percentage = row['Percentage']
+                                voter_ids = row['VoterIDs']
+                                
+                                # Create a nice card for each option
+                                st.markdown(f"""
+                                <div style="padding: 0.75rem; border-radius: 0.5rem; background-color: #f8f9fa; margin-bottom: 0.5rem; border-left: 4px solid {'#ff6b6b' if votes == max_votes else '#4ecdc4'};">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <div style="font-weight: 600; font-size: 1rem;">{label}</div>
+                                        <div style="font-weight: 500; color: #6c757d;">{votes} votes ({percentage:.1f}%)</div>
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                
+                                if voter_ids:
+                                    voter_ids_str = ", ".join([f"#{vid}" for vid in sorted(voter_ids)])
+                                    st.caption(f"Voters: {voter_ids_str}")
+                                else:
+                                    st.caption("No votes")
+                                
+                                st.write("")
+                    
+                    else:
+                        # No cached results yet - show placeholder
+                        st.info("👆 Click the button above to load results")
                 
                 elif config['type'] == 'private' and vote_count > 0:
                     # Private vote with decryption
                     can_decrypt = st.session_state.decryption_key is not None and len(st.session_state.decryption_key) > 0
                     
+                    # Check if we have cached results for this election
+                    election_cache = st.session_state.decrypted_votes_cache.get(election_id, {})
+                    has_cached_results = len(election_cache) > 0
+                    
                     if can_decrypt:
-                        # Try to decrypt votes
-                        try:
-                            with st.spinner("Decrypting votes..."):
-                                # Fetch encrypted votes from contract
-                                vote_data = contract.functions.getAllPrivateVotes(election_id).call()
-                                user_ids = vote_data[0]
-                                encrypted_sigs = vote_data[1]
+                        # Add decrypt/refresh button
+                        col_btn1, col_btn2 = st.columns([1, 4])
+                        with col_btn1:
+                            button_label = "🔄 Refresh Results" if has_cached_results else "🔓 Decrypt Results"
+                            decrypt_button = st.button(button_label, key=f"decrypt_{election_id}", type="primary", use_container_width=True)
+                        
+                        with col_btn2:
+                            if has_cached_results:
+                                st.caption(f"Showing {len(election_cache)} decrypted votes (click Refresh to check for new votes)")
+                            else:
+                                st.caption(f"{vote_count} encrypted votes ready to decrypt")
+                        
+                        # Decrypt votes when button is clicked
+                        if decrypt_button:
+                            try:
+                                # Step 1: Fetch encrypted votes
+                                with st.spinner("📥 Fetching encrypted votes from blockchain..."):
+                                    vote_data = contract.functions.getAllPrivateVotes(election_id).call()
+                                    user_ids = vote_data[0]
+                                    encrypted_sigs = vote_data[1]
                                 
-                                # Decrypt each vote
-                                decrypted_votes = []
+                                # Initialize cache for this election if not exists
+                                if election_id not in st.session_state.decrypted_votes_cache:
+                                    st.session_state.decrypted_votes_cache[election_id] = {}
+                                
+                                # Filter out already cached votes
+                                votes_to_decrypt = [
+                                    (int(user_id), encrypted_sig) 
+                                    for user_id, encrypted_sig in zip(user_ids, encrypted_sigs)
+                                    if int(user_id) not in st.session_state.decrypted_votes_cache[election_id]
+                                ]
+                                
+                                if len(votes_to_decrypt) == 0:
+                                    st.info("ℹ️ No new votes to decrypt")
+                                else:
+                                    # Step 2: Batch fetch all voter addresses at once (faster than individual calls)
+                                    with st.spinner(f"📍 Fetching {len(votes_to_decrypt)} voter addresses..."):
+                                        user_id_to_address = {}
+                                        for user_id, _ in votes_to_decrypt:
+                                            try:
+                                                address = contract.functions.idToAddress(user_id).call()
+                                                user_id_to_address[user_id] = address
+                                            except Exception as e:
+                                                st.warning(f"Could not fetch address for user #{user_id}: {str(e)}")
+                                    
+                                    # Step 3: Decrypt votes (this is the CPU-intensive part, not blockchain)
+                                    progress_text = st.empty()
+                                    new_votes_count = 0
+                                    
+                                    for idx, (user_id, encrypted_sig) in enumerate(votes_to_decrypt):
+                                        progress_text.text(f"🔓 Decrypting vote {idx + 1}/{len(votes_to_decrypt)}...")
+                                        
+                                        if user_id not in user_id_to_address:
+                                            continue
+                                        
+                                        try:
+                                            voter_address = user_id_to_address[user_id]
+                                            
+                                            # Decrypt and verify vote
+                                            result = decrypt_and_verify_vote(
+                                                encrypted_sig,
+                                                voter_address,
+                                                st.session_state.decryption_key,
+                                                PRIVATE_VOTE_OPTIONS[election_id]
+                                            )
+                                            
+                                            if result['vote']:
+                                                # Cache the decrypted vote
+                                                st.session_state.decrypted_votes_cache[election_id][user_id] = {
+                                                    'choice': result['vote']['choice'],
+                                                    'option_text': result['vote']['optionText']
+                                                }
+                                                new_votes_count += 1
+                                        except Exception as e:
+                                            st.warning(f"Could not decrypt vote from user #{user_id}: {str(e)}")
+                                            continue
+                                    
+                                    progress_text.empty()
+                                    
+                                    if new_votes_count > 0:
+                                        st.success(f"✅ Decrypted {new_votes_count} new vote(s)!")
+                                    else:
+                                        st.warning("⚠️ Could not decrypt any new votes")
+                                
+                                # Update cache reference
+                                election_cache = st.session_state.decrypted_votes_cache[election_id]
+                                has_cached_results = True
+                                time.sleep(0.3)  # Brief pause for user feedback
+                            
+                            except Exception as e:
+                                st.error(f"Error during decryption: {str(e)}")
+                        
+                        # Display results if we have cached data
+                        if has_cached_results and len(election_cache) > 0:
+                            try:
+                                # Aggregate cached votes
                                 vote_counts = [0] * config['options']
                                 voters_by_choice = {}
                                 
-                                for i, (user_id, encrypted_sig) in enumerate(zip(user_ids, encrypted_sigs)):
-                                    try:
-                                        # Get voter address from user ID
-                                        voter_address = contract.functions.idToAddress(user_id).call()
-                                        
-                                        # Decrypt and verify vote
-                                        result = decrypt_and_verify_vote(
-                                            encrypted_sig,
-                                            voter_address,
-                                            st.session_state.decryption_key,
-                                            PRIVATE_VOTE_OPTIONS[election_id]
-                                        )
-                                        
-                                        if result['vote']:
-                                            choice = result['vote']['choice']
-                                            vote_counts[choice - 1] += 1
-                                            
-                                            if choice not in voters_by_choice:
-                                                voters_by_choice[choice] = []
-                                            voters_by_choice[choice].append(int(user_id))
-                                            
-                                            decrypted_votes.append({
-                                                'user_id': int(user_id),
-                                                'choice': choice,
-                                                'option_text': result['vote']['optionText']
-                                            })
-                                    except Exception as e:
-                                        st.warning(f"Could not decrypt vote from user #{user_id}: {str(e)}")
-                                        continue
+                                for user_id, vote_data in election_cache.items():
+                                    choice = vote_data['choice']
+                                    vote_counts[choice - 1] += 1
+                                    
+                                    if choice not in voters_by_choice:
+                                        voters_by_choice[choice] = []
+                                    voters_by_choice[choice].append(user_id)
                                 
                                 # Display results similar to public votes
                                 option_labels = []
@@ -944,12 +1068,13 @@ if st.session_state.web3 and st.session_state.contract:
                                 })
                                 
                                 # Calculate percentages
-                                df['Percentage'] = (df['Votes'] / vote_count * 100).round(1) if vote_count > 0 else 0
+                                total_decrypted = len(election_cache)
+                                df['Percentage'] = (df['Votes'] / total_decrypted * 100).round(1) if total_decrypted > 0 else 0
+                    
                                 
                                 # Find winner
                                 max_votes = df['Votes'].max()
                                 winners = df[df['Votes'] == max_votes]['Option'].tolist()
-                                
                                 # Create modern visualization with Plotly
                                 col1, col2 = st.columns([2, 1])
                                 
@@ -1002,16 +1127,17 @@ if st.session_state.web3 and st.session_state.contract:
                                     if len(winners) == 1:
                                         st.success(f"**{winners[0]}**")
                                         st.metric("Winning Votes", max_votes)
-                                        st.metric("Margin", f"{(df['Votes'].max() / vote_count * 100):.1f}%" if vote_count > 0 else "0%")
+                                        st.metric("Margin", f"{(df['Votes'].max() / total_decrypted * 100):.1f}%" if total_decrypted > 0 else "0%")
                                     else:
                                         st.info(f"**Tie**")
                                         st.write(f"{', '.join(winners)}")
                                         st.metric("Tied Votes", max_votes)
                                     
                                     st.divider()
-                                    st.metric("Total Votes", vote_count)
-                                    total_registered = contract.functions.getTotalRegistered().call()
-                                    st.metric("Turnout Rate", f"{(vote_count / total_registered * 100):.1f}%" if vote_count > 0 and total_registered > 0 else "0%")
+                                    st.metric("Decrypted Votes", total_decrypted)
+                                    st.metric("Total Cast", vote_count)
+                                    if total_decrypted < vote_count:
+                                        st.caption(f"{vote_count - total_decrypted} votes pending decryption")
                                 
                                 # Voter details hidden behind a non-obvious element
                                 # Use a subtle "..." button or small text
@@ -1047,10 +1173,12 @@ if st.session_state.web3 and st.session_state.contract:
                                             st.caption("No votes")
                                         
                                         st.write("")
+                            
+                            except Exception as e:
+                                st.error(f"Error displaying results: {str(e)}")
                         
-                        except Exception as e:
-                            st.error(f"Error decrypting votes: {str(e)}")
-                            # Fall back to showing encrypted state
+                        else:
+                            # No cached results yet - show encrypted state
                             col1, col2 = st.columns([2, 1])
                             
                             with col1:
@@ -1058,14 +1186,13 @@ if st.session_state.web3 and st.session_state.contract:
                                 <div style="padding: 2rem; border-radius: 0.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-align: center;">
                                     <div style="font-size: 3rem; margin-bottom: 1rem;">🔐</div>
                                     <div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem;">Private Election</div>
-                                    <div style="font-size: 0.9rem; opacity: 0.9;">Decryption failed - check your key</div>
+                                    <div style="font-size: 0.9rem; opacity: 0.9;">Click "Decrypt Results" to view</div>
                                 </div>
                                 """, unsafe_allow_html=True)
                             
                             with col2:
                                 st.metric("Encrypted Votes", vote_count)
                                 st.metric("Status", "Sealed" if status == "Closed" else "Open")
-                                st.caption("Decryption key required")
                     
                     else:
                         # No decryption key provided
