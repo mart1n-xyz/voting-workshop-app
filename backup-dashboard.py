@@ -623,6 +623,16 @@ else:
                         )
                         
                         st.caption(f"Total: {len(votes_df)} votes")
+                        
+                        # Download button for public votes
+                        csv = votes_df.to_csv(index=False)
+                        st.download_button(
+                            label="📥 Download Public Votes (CSV)",
+                            data=csv,
+                            file_name=f"public_votes_election_{query_election_id}.csv",
+                            mime="text/csv",
+                            width='stretch'
+                        )
                     else:
                         st.info("No votes recorded yet.")
                 
@@ -661,112 +671,223 @@ else:
                             encrypted_signatures = private_votes[1]
                             
                             if len(private_user_ids) > 0:
-                                # First show encrypted data
-                                st.markdown("### 📦 Encrypted Data")
-                                encrypted_df = pd.DataFrame({
-                                    'User ID': [int(uid) for uid in private_user_ids],
-                                    'Encrypted Data (Hex)': [sig.hex() for sig in encrypted_signatures]
-                                })
-                                encrypted_df = encrypted_df.sort_values('User ID').reset_index(drop=True)
-                                
-                                st.dataframe(
-                                    encrypted_df,
-                                    width='stretch',
-                                    hide_index=True,
-                                    height=min(300, 50 + len(encrypted_df) * 35)
-                                )
+                                # First show encrypted data (collapsible)
+                                with st.expander("📦 Encrypted Data", expanded=False):
+                                    encrypted_df = pd.DataFrame({
+                                        'User ID': [int(uid) for uid in private_user_ids],
+                                        'Encrypted Data (Hex)': [sig.hex() for sig in encrypted_signatures]
+                                    })
+                                    encrypted_df = encrypted_df.sort_values('User ID').reset_index(drop=True)
+                                    
+                                    st.dataframe(
+                                        encrypted_df,
+                                        width='stretch',
+                                        hide_index=True,
+                                        height=min(300, 50 + len(encrypted_df) * 35)
+                                    )
                                 
                                 # Decrypt votes if key is provided
                                 if decryption_key and len(vote_options) > 0:
                                     st.divider()
-                                    st.markdown("### 🔓 Decrypted Votes")
                                     
-                                    with st.spinner("Decrypting votes..."):
-                                        decrypted_votes = []
-                                        failed_decrypts = []
-                                        
-                                        # Get voter addresses
-                                        user_id_to_address = {}
-                                        for user_id in private_user_ids:
-                                            try:
-                                                address = contract.functions.idToAddress(user_id).call()
-                                                user_id_to_address[int(user_id)] = address
-                                            except Exception as e:
-                                                st.warning(f"Could not fetch address for user #{user_id}: {str(e)}")
-                                        
-                                        # Decrypt each vote
-                                        for i, (user_id, encrypted_sig) in enumerate(zip(private_user_ids, encrypted_signatures)):
-                                            try:
-                                                user_address = user_id_to_address.get(int(user_id))
-                                                if not user_address:
+                                    # Decrypted votes section (collapsible)
+                                    with st.expander("🔓 Decrypted Votes", expanded=False):
+                                        with st.spinner("Decrypting votes..."):
+                                            decrypted_votes = []
+                                            failed_decrypts = []
+                                            
+                                            # Get voter addresses
+                                            user_id_to_address = {}
+                                            for user_id in private_user_ids:
+                                                try:
+                                                    address = contract.functions.idToAddress(user_id).call()
+                                                    user_id_to_address[int(user_id)] = address
+                                                except Exception as e:
+                                                    st.warning(f"Could not fetch address for user #{user_id}: {str(e)}")
+                                            
+                                            # Decrypt each vote
+                                            for i, (user_id, encrypted_sig) in enumerate(zip(private_user_ids, encrypted_signatures)):
+                                                try:
+                                                    user_address = user_id_to_address.get(int(user_id))
+                                                    if not user_address:
+                                                        failed_decrypts.append({
+                                                            'User ID': int(user_id),
+                                                            'Error': 'Address not found'
+                                                        })
+                                                        continue
+                                                    
+                                                    # Decrypt and verify
+                                                    result = decrypt_and_verify_vote(
+                                                        encrypted_sig,
+                                                        user_address,
+                                                        decryption_key,
+                                                        vote_options
+                                                    )
+                                                    
+                                                    if result['vote']:
+                                                        # Get the actual option text from vote config
+                                                        option_idx = result['vote']['optionIndex']
+                                                        if 0 <= option_idx < len(query_options):
+                                                            option_text = query_options[option_idx]['text']
+                                                        else:
+                                                            option_text = result['vote']['optionText']
+                                                        
+                                                        decrypted_votes.append({
+                                                            'User ID': int(user_id),
+                                                            'Choice': option_text,
+                                                            'Vote Text': result['vote']['optionText']
+                                                        })
+                                                    else:
+                                                        failed_decrypts.append({
+                                                            'User ID': int(user_id),
+                                                            'Error': 'Signature verification failed'
+                                                        })
+                                                except Exception as e:
                                                     failed_decrypts.append({
                                                         'User ID': int(user_id),
-                                                        'Error': 'Address not found'
+                                                        'Error': str(e)
                                                     })
-                                                    continue
+                                            
+                                            # Store decrypted votes for display outside expander
+                                            if decrypted_votes:
+                                                st.success(f"✅ Successfully decrypted {len(decrypted_votes)} vote(s)")
                                                 
-                                                # Decrypt and verify
-                                                result = decrypt_and_verify_vote(
-                                                    encrypted_sig,
-                                                    user_address,
-                                                    decryption_key,
-                                                    vote_options
+                                                # Store in session state for access outside expander
+                                                st.session_state[f'decrypted_votes_{query_election_id}'] = decrypted_votes
+                                                st.session_state[f'failed_decrypts_{query_election_id}'] = failed_decrypts
+                                                
+                                                # Display individual votes table inside expander
+                                                st.divider()
+                                                st.subheader("👥 Individual Votes")
+                                                
+                                                decrypted_df = pd.DataFrame(decrypted_votes)
+                                                decrypted_df = decrypted_df.sort_values('User ID').reset_index(drop=True)
+                                                
+                                                st.dataframe(
+                                                    decrypted_df,
+                                                    width='stretch',
+                                                    hide_index=True,
+                                                    height=min(400, 50 + len(decrypted_df) * 35)
                                                 )
                                                 
-                                                if result['vote']:
-                                                    # Get the actual option text from vote config
-                                                    option_idx = result['vote']['optionIndex']
-                                                    if 0 <= option_idx < len(query_options):
-                                                        option_text = query_options[option_idx]['text']
-                                                    else:
-                                                        option_text = result['vote']['optionText']
-                                                    
-                                                    decrypted_votes.append({
-                                                        'User ID': int(user_id),
-                                                        'Choice': option_text,
-                                                        'Vote Text': result['vote']['optionText']
-                                                    })
-                                                else:
-                                                    failed_decrypts.append({
-                                                        'User ID': int(user_id),
-                                                        'Error': 'Signature verification failed'
-                                                    })
-                                            except Exception as e:
-                                                failed_decrypts.append({
-                                                    'User ID': int(user_id),
-                                                    'Error': str(e)
-                                                })
-                                        
-                                        # Display decrypted votes
-                                        if decrypted_votes:
-                                            decrypted_df = pd.DataFrame(decrypted_votes)
-                                            decrypted_df = decrypted_df.sort_values('User ID').reset_index(drop=True)
-                                            
-                                            st.success(f"✅ Successfully decrypted {len(decrypted_votes)} vote(s)")
-                                            
-                                            st.dataframe(
-                                                decrypted_df,
-                                                width='stretch',
-                                                hide_index=True,
-                                                height=min(400, 50 + len(decrypted_df) * 35)
-                                            )
-                                            
-                                            st.caption(f"Total decrypted: {len(decrypted_votes)} vote(s)")
-                                        
-                                        # Show failed decryptions if any
-                                        if failed_decrypts:
-                                            st.warning(f"⚠️ Failed to decrypt {len(failed_decrypts)} vote(s)")
-                                            failed_df = pd.DataFrame(failed_decrypts)
-                                            st.dataframe(
-                                                failed_df,
-                                                width='stretch',
-                                                hide_index=True
-                                            )
+                                                st.caption(f"Total decrypted: {len(decrypted_votes)} vote(s)")
                                 else:
                                     st.info("💡 Enter decryption key and vote options above to decrypt votes.")
                                 
                             else:
                                 st.info("No encrypted votes recorded yet.")
+                            
+                            # Display results overview and download button outside expander (if decrypted)
+                            if decryption_key and len(vote_options) > 0:
+                                decrypted_votes = st.session_state.get(f'decrypted_votes_{query_election_id}', [])
+                                failed_decrypts = st.session_state.get(f'failed_decrypts_{query_election_id}', [])
+                                
+                                if decrypted_votes:
+                                    st.divider()
+                                    st.subheader("📊 Election Results")
+                                    
+                                    # Count votes per option
+                                    option_vote_counts = {}
+                                    for opt in query_options:
+                                        option_vote_counts[opt['text']] = 0
+                                    
+                                    for vote in decrypted_votes:
+                                        choice_text = vote['Choice']
+                                        if choice_text in option_vote_counts:
+                                            option_vote_counts[choice_text] += 1
+                                    
+                                    # Create results dataframe
+                                    option_labels = [opt['text'] for opt in query_options]
+                                    vote_counts = [option_vote_counts[opt['text']] for opt in query_options]
+                                    
+                                    results_df = pd.DataFrame({
+                                        'Option': option_labels,
+                                        'Votes': vote_counts
+                                    })
+                                    
+                                    # Calculate percentages
+                                    total_decrypted = len(decrypted_votes)
+                                    results_df['Percentage'] = (results_df['Votes'] / total_decrypted * 100).round(1) if total_decrypted > 0 else 0
+                                    
+                                    # Find winner(s)
+                                    max_votes = results_df['Votes'].max()
+                                    winners = results_df[results_df['Votes'] == max_votes]['Option'].tolist()
+                                    
+                                    # Display winner
+                                    if len(winners) == 1:
+                                        st.success(f"🏆 Winner: **{winners[0]}** with {max_votes} votes ({results_df[results_df['Votes'] == max_votes]['Percentage'].values[0]:.1f}%)")
+                                    else:
+                                        st.warning(f"🤝 Tie between: **{', '.join(winners)}** with {max_votes} votes each")
+                                    
+                                    # Create visualization
+                                    col1, col2 = st.columns([2, 1])
+                                    
+                                    with col1:
+                                        # Create horizontal bar chart with Plotly
+                                        colors = ['#ff6b6b' if v == max_votes else '#a78bfa' for v in results_df['Votes']]
+                                        
+                                        fig = go.Figure(data=[
+                                            go.Bar(
+                                                y=results_df['Option'],
+                                                x=results_df['Votes'],
+                                                orientation='h',
+                                                marker=dict(
+                                                    color=colors,
+                                                    line=dict(color='rgba(0,0,0,0.1)', width=1)
+                                                ),
+                                                text=[f"{v} ({p:.1f}%)" for v, p in zip(results_df['Votes'], results_df['Percentage'])],
+                                                textposition='outside',
+                                                hovertemplate='<b>%{y}</b><br>Votes: %{x}<br><extra></extra>'
+                                            )
+                                        ])
+                                        
+                                        fig.update_layout(
+                                            title="Vote Distribution",
+                                            xaxis_title="Number of Votes",
+                                            yaxis_title="",
+                                            height=max(300, len(option_labels) * 60),
+                                            showlegend=False,
+                                            plot_bgcolor='rgba(0,0,0,0)',
+                                            paper_bgcolor='rgba(0,0,0,0)',
+                                            margin=dict(l=20, r=20, t=40, b=20),
+                                            font=dict(size=12)
+                                        )
+                                        
+                                        fig.update_xaxes(gridcolor='rgba(128,128,128,0.2)')
+                                        fig.update_yaxes(gridcolor='rgba(128,128,128,0.2)')
+                                        
+                                        st.plotly_chart(fig, width='stretch')
+                                    
+                                    with col2:
+                                        # Display summary table
+                                        st.markdown("### Summary")
+                                        for _, row in results_df.iterrows():
+                                            emoji = "🏆" if row['Votes'] == max_votes else "📊"
+                                            st.markdown(f"{emoji} **{row['Option']}**")
+                                            st.markdown(f"  {row['Votes']} votes ({row['Percentage']:.1f}%)")
+                                            st.markdown("")
+                                    
+                                    # Download button for decrypted votes
+                                    decrypted_df = pd.DataFrame(decrypted_votes)
+                                    decrypted_df = decrypted_df.sort_values('User ID').reset_index(drop=True)
+                                    csv = decrypted_df.to_csv(index=False)
+                                    st.download_button(
+                                        label="📥 Download Decrypted Votes (CSV)",
+                                        data=csv,
+                                        file_name=f"decrypted_votes_election_{query_election_id}.csv",
+                                        mime="text/csv",
+                                        width='stretch'
+                                    )
+                                    
+                                    # Show failed decryptions if any
+                                    if failed_decrypts:
+                                        st.warning(f"⚠️ Failed to decrypt {len(failed_decrypts)} vote(s)")
+                                        failed_df = pd.DataFrame(failed_decrypts)
+                                        st.dataframe(
+                                            failed_df,
+                                            width='stretch',
+                                            hide_index=True
+                                        )
                                 
                         except Exception as e:
                             st.warning(f"⚠️ Could not fetch encrypted votes: {str(e)}")
