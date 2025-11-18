@@ -36,13 +36,13 @@ const CreateAWallet = () => {
 
   const createWalletEvmHandler = async () => {
     await createWalletEvm({
-      createAdditional: true,
+      createAdditional: false,
     });
   };
   const createWalletSolanaHandler = async () => {
     try {
       await createWalletSolana({
-        createAdditional: true,
+        createAdditional: false,
       });
       showSuccessToast("Solana wallet created successfully.");
     } catch (error) {

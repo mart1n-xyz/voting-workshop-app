@@ -385,6 +385,32 @@ def get_assigned_district(wallet_address: str, seed: str = "default") -> str:
     
     return districts[district_index]
 
+def get_assigned_committee(wallet_address: str) -> str:
+    """
+    Get assigned committee for a wallet address (deterministic)
+    Uses simple hash to assign one of three committees with equal probability
+    Matches the TypeScript implementation in votesConfig.ts
+    
+    Args:
+        wallet_address: The wallet address to assign a committee to
+    
+    Returns:
+        Committee name: "Marketing", "Operations", or "Community"
+    """
+    # Simple hash: sum of character codes
+    hash_value = 0
+    normalized = wallet_address.lower()
+    input_str = normalized + "committee"  # Add seed for committee assignment
+    
+    for char in input_str:
+        hash_value = (hash_value * 31 + ord(char)) & 0xFFFFFFFF  # >>> 0 equivalent in Python
+    
+    # Map to committees (0-2) - equal probability
+    committee_index = hash_value % 3
+    committees = ['Marketing', 'Operations', 'Community']
+    
+    return committees[committee_index]
+
 def calculate_vote_results(vote_df, vote_config, participants_df):
     """Calculate vote results and match with participants"""
     if vote_df is None or len(vote_df) == 0:
@@ -618,6 +644,111 @@ def calculate_vote1b_points(results_df, participants_df):
         'school_districts': school_districts,
         'district_vote_counts': district_vote_counts,
         'total_votes': total_votes,
+        'points_df': points_df
+    }
+    
+    return summary
+
+def calculate_vote2_points(results_df, participants_df, vote_key):
+    """
+    Calculate points for Votes 2a-2d based on the payoff structure:
+    - A – Citywide Campaign: 18 points to Marketing, 3 to others
+    - B – Process Upgrade: 18 points to Operations, 3 to others
+    - C – Community Program: 18 points to Community, 3 to others
+    - D – Shared Hub: 12 points to all voters
+    - D with ≥50% in vote2d: 20 points (12+8 bonus) to D voters only
+    
+    Args:
+        results_df: DataFrame with vote results
+        participants_df: DataFrame with all participants
+        vote_key: The vote key ('vote2a', 'vote2b', 'vote2c', or 'vote2d')
+    """
+    if results_df is None or len(results_df) == 0:
+        return None
+    
+    # Extract initiative from choice (e.g., "A – Citywide Campaign (Marketing)" -> "A")
+    def extract_initiative(choice):
+        if choice.startswith('A'):
+            return 'A'
+        elif choice.startswith('B'):
+            return 'B'
+        elif choice.startswith('C'):
+            return 'C'
+        elif choice.startswith('D'):
+            return 'D'
+        return None
+    
+    # Add initiative voted column
+    results_df = results_df.copy()
+    results_df['Initiative Voted'] = results_df['Choice'].apply(extract_initiative)
+    
+    # Add assigned committee for each participant (same for all rounds 2a-2d)
+    results_df['Assigned Committee'] = results_df['Wallet Address'].apply(
+        lambda addr: get_assigned_committee(addr) if pd.notna(addr) else None
+    )
+    
+    # Calculate total votes and percentages per initiative
+    total_votes = len(results_df)
+    initiative_vote_counts = results_df['Initiative Voted'].value_counts().to_dict()
+    
+    # Check if D reached 50% threshold (only for vote2d)
+    is_vote2d = vote_key == 'vote2d'
+    d_threshold_met = False
+    if is_vote2d:
+        d_votes = initiative_vote_counts.get('D', 0)
+        d_percentage = (d_votes / total_votes * 100) if total_votes > 0 else 0
+        d_threshold_met = d_percentage >= 50
+    
+    # Initialize points for all participants
+    points_df = participants_df.copy()
+    points_df['Assigned Committee'] = points_df['Wallet Address'].apply(
+        lambda addr: get_assigned_committee(addr) if pd.notna(addr) else None
+    )
+    points_df['Points'] = 0
+    
+    # Calculate points for each vote
+    for _, vote_row in results_df.iterrows():
+        user_id = vote_row['User ID']
+        initiative = vote_row['Initiative Voted']
+        committee = vote_row['Assigned Committee']
+        
+        if initiative is None or committee is None:
+            continue
+        
+        # Find participant
+        participant_idx = points_df.index[points_df['User ID'] == user_id].tolist()
+        if not participant_idx:
+            continue
+        
+        participant_idx = participant_idx[0]
+        participant_committee = points_df.loc[participant_idx, 'Assigned Committee']
+        
+        # Calculate points based on initiative and committee
+        if initiative == 'A':
+            # A: 18 to Marketing, 3 to others
+            points = 18 if participant_committee == 'Marketing' else 3
+        elif initiative == 'B':
+            # B: 18 to Operations, 3 to others
+            points = 18 if participant_committee == 'Operations' else 3
+        elif initiative == 'C':
+            # C: 18 to Community, 3 to others
+            points = 18 if participant_committee == 'Community' else 3
+        elif initiative == 'D':
+            # D: 12 to all, or 20 (12+8) if threshold met in vote2d
+            if is_vote2d and d_threshold_met:
+                points = 20  # 12 base + 8 bonus
+            else:
+                points = 12
+        else:
+            points = 0
+        
+        points_df.loc[participant_idx, 'Points'] = points
+    
+    # Create summary
+    summary = {
+        'initiative_vote_counts': initiative_vote_counts,
+        'total_votes': total_votes,
+        'd_threshold_met': d_threshold_met,
         'points_df': points_df
     }
     
@@ -866,8 +997,8 @@ else:
                                 width='stretch'
                             )
                             
-                            # Points calculation for Vote 1a and 1b
-                            if vote_key in ['vote1a', 'vote1b']:
+                            # Points calculation for Vote 1a, 1b, and 2a-2d
+                            if vote_key in ['vote1a', 'vote1b', 'vote2a', 'vote2b', 'vote2c', 'vote2d']:
                                 st.divider()
                                 st.markdown("### ⭐ Points Calculation")
                                 
@@ -876,61 +1007,124 @@ else:
                                     points_summary = calculate_vote1a_points(results['results_df'], participants_df)
                                 elif vote_key == 'vote1b':
                                     points_summary = calculate_vote1b_points(results['results_df'], participants_df)
+                                elif vote_key in ['vote2a', 'vote2b', 'vote2c', 'vote2d']:
+                                    points_summary = calculate_vote2_points(results['results_df'], participants_df, vote_key)
                                 else:
                                     points_summary = None
                                 
                                 if points_summary:
-                                    # Display school district status
-                                    if points_summary['school_districts']:
-                                        st.success(f"🏫 **School District(s):** {', '.join([f'District {d}' for d in points_summary['school_districts']])}")
-                                        st.caption("A programming school will be opened in the district(s) with ≥60% of votes")
-                                    else:
-                                        st.info("ℹ️ No district reached 60% threshold - no school will be opened")
+                                    # Handle votes 1a/1b (district-based)
+                                    if vote_key in ['vote1a', 'vote1b']:
+                                        # Display school district status
+                                        if points_summary['school_districts']:
+                                            st.success(f"🏫 **School District(s):** {', '.join([f'District {d}' for d in points_summary['school_districts']])}")
+                                            st.caption("A programming school will be opened in the district(s) with ≥60% of votes")
+                                        else:
+                                            st.info("ℹ️ No district reached 60% threshold - no school will be opened")
+                                        
+                                        # Display district vote summary
+                                        st.markdown("#### District Vote Summary")
+                                        district_summary_data = []
+                                        for district in ['A', 'B', 'C', 'D']:
+                                            votes = points_summary['district_vote_counts'].get(district, 0)
+                                            percentage = (votes / points_summary['total_votes'] * 100) if points_summary['total_votes'] > 0 else 0
+                                            is_school = district in points_summary['school_districts']
+                                            district_summary_data.append({
+                                                'District': district,
+                                                'Votes': votes,
+                                                'Percentage': f"{percentage:.1f}%",
+                                                'Status': '🏫 School District' if is_school else 'Regular District'
+                                            })
+                                        
+                                        district_summary_df = pd.DataFrame(district_summary_data)
+                                        st.dataframe(district_summary_df, hide_index=True, width='stretch')
+                                        
+                                        # Display points leaderboard
+                                        st.markdown("#### Points Leaderboard")
+                                        points_display_df = points_summary['points_df'][['User ID', 'Wallet Address', 'Assigned District', 'Base Points', 'Bonus Points', 'Total Points']].copy()
+                                        points_display_df = points_display_df.sort_values('Total Points', ascending=False)
+                                        
+                                        # Format wallet addresses for display
+                                        points_display_df['Wallet Address'] = points_display_df['Wallet Address'].apply(
+                                            lambda x: f"{x[:6]}...{x[-4:]}" if pd.notna(x) and len(str(x)) > 10 else x
+                                        )
+                                        
+                                        st.dataframe(
+                                            points_display_df,
+                                            width='stretch',
+                                            hide_index=True,
+                                            height=min(600, 50 + len(points_display_df) * 40),
+                                            column_config={
+                                                "User ID": st.column_config.NumberColumn("User ID", width="small"),
+                                                "Wallet Address": st.column_config.TextColumn("Wallet Address", width="medium"),
+                                                "Assigned District": st.column_config.TextColumn("District", width="small"),
+                                                "Base Points": st.column_config.NumberColumn("Base Points", width="small"),
+                                                "Bonus Points": st.column_config.NumberColumn("Bonus Points", width="small"),
+                                                "Total Points": st.column_config.NumberColumn("Total Points", width="small", format="%d")
+                                            }
+                                        )
+                                        
+                                        # Download points data
+                                        points_csv = points_summary['points_df'][['User ID', 'Wallet Address', 'Assigned District', 'Base Points', 'Bonus Points', 'Total Points']].to_csv(index=False)
                                     
-                                    # Display district vote summary
-                                    st.markdown("#### District Vote Summary")
-                                    district_summary_data = []
-                                    for district in ['A', 'B', 'C', 'D']:
-                                        votes = points_summary['district_vote_counts'].get(district, 0)
-                                        percentage = (votes / points_summary['total_votes'] * 100) if points_summary['total_votes'] > 0 else 0
-                                        is_school = district in points_summary['school_districts']
-                                        district_summary_data.append({
-                                            'District': district,
-                                            'Votes': votes,
-                                            'Percentage': f"{percentage:.1f}%",
-                                            'Status': '🏫 School District' if is_school else 'Regular District'
-                                        })
-                                    
-                                    district_summary_df = pd.DataFrame(district_summary_data)
-                                    st.dataframe(district_summary_df, hide_index=True, width='stretch')
-                                    
-                                    # Display points leaderboard
-                                    st.markdown("#### Points Leaderboard")
-                                    points_display_df = points_summary['points_df'][['User ID', 'Wallet Address', 'Assigned District', 'Base Points', 'Bonus Points', 'Total Points']].copy()
-                                    points_display_df = points_display_df.sort_values('Total Points', ascending=False)
-                                    
-                                    # Format wallet addresses for display
-                                    points_display_df['Wallet Address'] = points_display_df['Wallet Address'].apply(
-                                        lambda x: f"{x[:6]}...{x[-4:]}" if pd.notna(x) and len(str(x)) > 10 else x
-                                    )
-                                    
-                                    st.dataframe(
-                                        points_display_df,
-                                        width='stretch',
-                                        hide_index=True,
-                                        height=min(600, 50 + len(points_display_df) * 40),
-                                        column_config={
-                                            "User ID": st.column_config.NumberColumn("User ID", width="small"),
-                                            "Wallet Address": st.column_config.TextColumn("Wallet Address", width="medium"),
-                                            "Assigned District": st.column_config.TextColumn("District", width="small"),
-                                            "Base Points": st.column_config.NumberColumn("Base Points", width="small"),
-                                            "Bonus Points": st.column_config.NumberColumn("Bonus Points", width="small"),
-                                            "Total Points": st.column_config.NumberColumn("Total Points", width="small", format="%d")
+                                    # Handle votes 2a-2d (committee-based)
+                                    elif vote_key in ['vote2a', 'vote2b', 'vote2c', 'vote2d']:
+                                        # Display D threshold status for vote2d
+                                        if vote_key == 'vote2d':
+                                            if points_summary['d_threshold_met']:
+                                                st.success(f"🎁 **Shared Hub Bonus Activated!** D received ≥50% of votes")
+                                                st.caption("All D voters receive 20 points (12 base + 8 bonus)")
+                                            else:
+                                                st.info("ℹ️ D did not reach 50% threshold - no bonus activated")
+                                        
+                                        # Display initiative vote summary
+                                        st.markdown("#### Initiative Vote Summary")
+                                        initiative_summary_data = []
+                                        initiative_labels = {
+                                            'A': 'A – Citywide Campaign (Marketing)',
+                                            'B': 'B – Process Upgrade (Operations)',
+                                            'C': 'C – Community Program (Community)',
+                                            'D': 'D – Shared Hub'
                                         }
-                                    )
+                                        for initiative in ['A', 'B', 'C', 'D']:
+                                            votes = points_summary['initiative_vote_counts'].get(initiative, 0)
+                                            percentage = (votes / points_summary['total_votes'] * 100) if points_summary['total_votes'] > 0 else 0
+                                            initiative_summary_data.append({
+                                                'Initiative': initiative_labels[initiative],
+                                                'Votes': votes,
+                                                'Percentage': f"{percentage:.1f}%"
+                                            })
+                                        
+                                        initiative_summary_df = pd.DataFrame(initiative_summary_data)
+                                        st.dataframe(initiative_summary_df, hide_index=True, width='stretch')
+                                        
+                                        # Display points leaderboard
+                                        st.markdown("#### Points Leaderboard")
+                                        points_display_df = points_summary['points_df'][['User ID', 'Wallet Address', 'Assigned Committee', 'Points']].copy()
+                                        points_display_df = points_display_df.sort_values('Points', ascending=False)
+                                        
+                                        # Format wallet addresses for display
+                                        points_display_df['Wallet Address'] = points_display_df['Wallet Address'].apply(
+                                            lambda x: f"{x[:6]}...{x[-4:]}" if pd.notna(x) and len(str(x)) > 10 else x
+                                        )
+                                        
+                                        st.dataframe(
+                                            points_display_df,
+                                            width='stretch',
+                                            hide_index=True,
+                                            height=min(600, 50 + len(points_display_df) * 40),
+                                            column_config={
+                                                "User ID": st.column_config.NumberColumn("User ID", width="small"),
+                                                "Wallet Address": st.column_config.TextColumn("Wallet Address", width="medium"),
+                                                "Assigned Committee": st.column_config.TextColumn("Committee", width="medium"),
+                                                "Points": st.column_config.NumberColumn("Points", width="small", format="%d")
+                                            }
+                                        )
+                                        
+                                        # Download points data
+                                        points_csv = points_summary['points_df'][['User ID', 'Wallet Address', 'Assigned Committee', 'Points']].to_csv(index=False)
                                     
-                                    # Download points data
-                                    points_csv = points_summary['points_df'][['User ID', 'Wallet Address', 'Assigned District', 'Base Points', 'Bonus Points', 'Total Points']].to_csv(index=False)
+                                    # Download button (common for both vote types)
                                     st.download_button(
                                         label="📥 Download Points Data (CSV)",
                                         data=points_csv,
@@ -971,8 +1165,8 @@ else:
                         vote_counts_df['Percentage'] = (vote_counts_df['Votes'] / results['total_votes'] * 100).round(1)
                         st.dataframe(vote_counts_df, hide_index=True)
                         
-                        # Points calculation for Vote 1a and 1b (existing data)
-                        if vote_key in ['vote1a', 'vote1b']:
+                        # Points calculation for Vote 1a, 1b, and 2a-2d (existing data)
+                        if vote_key in ['vote1a', 'vote1b', 'vote2a', 'vote2b', 'vote2c', 'vote2d']:
                             st.divider()
                             st.markdown("### ⭐ Points Calculation")
                             
@@ -981,61 +1175,35 @@ else:
                                 points_summary = calculate_vote1a_points(results['results_df'], participants_df)
                             elif vote_key == 'vote1b':
                                 points_summary = calculate_vote1b_points(results['results_df'], participants_df)
+                            elif vote_key in ['vote2a', 'vote2b', 'vote2c', 'vote2d']:
+                                points_summary = calculate_vote2_points(results['results_df'], participants_df, vote_key)
                             else:
                                 points_summary = None
                             
                             if points_summary:
-                                # Display school district status
-                                if points_summary['school_districts']:
-                                    st.success(f"🏫 **School District(s):** {', '.join([f'District {d}' for d in points_summary['school_districts']])}")
-                                    st.caption("A programming school will be opened in the district(s) with ≥60% of votes")
-                                else:
-                                    st.info("ℹ️ No district reached 60% threshold - no school will be opened")
+                                # Handle votes 1a/1b (district-based)
+                                if vote_key in ['vote1a', 'vote1b']:
+                                    # Similar display as above for existing data
+                                    st.markdown("#### Points Summary")
+                                    points_display_df = points_summary['points_df'][['User ID', 'Wallet Address', 'Assigned District', 'Base Points', 'Bonus Points', 'Total Points']].copy()
+                                    points_display_df = points_display_df.sort_values('Total Points', ascending=False)
+                                    points_display_df['Wallet Address'] = points_display_df['Wallet Address'].apply(
+                                        lambda x: f"{x[:6]}...{x[-4:]}" if pd.notna(x) and len(str(x)) > 10 else x
+                                    )
+                                    st.dataframe(points_display_df, hide_index=True, width='stretch')
+                                    points_csv = points_summary['points_df'][['User ID', 'Wallet Address', 'Assigned District', 'Base Points', 'Bonus Points', 'Total Points']].to_csv(index=False)
                                 
-                                # Display district vote summary
-                                st.markdown("#### District Vote Summary")
-                                district_summary_data = []
-                                for district in ['A', 'B', 'C', 'D']:
-                                    votes = points_summary['district_vote_counts'].get(district, 0)
-                                    percentage = (votes / points_summary['total_votes'] * 100) if points_summary['total_votes'] > 0 else 0
-                                    is_school = district in points_summary['school_districts']
-                                    district_summary_data.append({
-                                        'District': district,
-                                        'Votes': votes,
-                                        'Percentage': f"{percentage:.1f}%",
-                                        'Status': '🏫 School District' if is_school else 'Regular District'
-                                    })
+                                # Handle votes 2a-2d (committee-based)
+                                elif vote_key in ['vote2a', 'vote2b', 'vote2c', 'vote2d']:
+                                    st.markdown("#### Points Summary")
+                                    points_display_df = points_summary['points_df'][['User ID', 'Wallet Address', 'Assigned Committee', 'Points']].copy()
+                                    points_display_df = points_display_df.sort_values('Points', ascending=False)
+                                    points_display_df['Wallet Address'] = points_display_df['Wallet Address'].apply(
+                                        lambda x: f"{x[:6]}...{x[-4:]}" if pd.notna(x) and len(str(x)) > 10 else x
+                                    )
+                                    st.dataframe(points_display_df, hide_index=True, width='stretch')
+                                    points_csv = points_summary['points_df'][['User ID', 'Wallet Address', 'Assigned Committee', 'Points']].to_csv(index=False)
                                 
-                                district_summary_df = pd.DataFrame(district_summary_data)
-                                st.dataframe(district_summary_df, hide_index=True, width='stretch')
-                                
-                                # Display points leaderboard
-                                st.markdown("#### Points Leaderboard")
-                                points_display_df = points_summary['points_df'][['User ID', 'Wallet Address', 'Assigned District', 'Base Points', 'Bonus Points', 'Total Points']].copy()
-                                points_display_df = points_display_df.sort_values('Total Points', ascending=False)
-                                
-                                # Format wallet addresses for display
-                                points_display_df['Wallet Address'] = points_display_df['Wallet Address'].apply(
-                                    lambda x: f"{x[:6]}...{x[-4:]}" if pd.notna(x) and len(str(x)) > 10 else x
-                                )
-                                
-                                st.dataframe(
-                                    points_display_df,
-                                    width='stretch',
-                                    hide_index=True,
-                                    height=min(600, 50 + len(points_display_df) * 40),
-                                    column_config={
-                                        "User ID": st.column_config.NumberColumn("User ID", width="small"),
-                                        "Wallet Address": st.column_config.TextColumn("Wallet Address", width="medium"),
-                                        "Assigned District": st.column_config.TextColumn("District", width="small"),
-                                        "Base Points": st.column_config.NumberColumn("Base Points", width="small"),
-                                        "Bonus Points": st.column_config.NumberColumn("Bonus Points", width="small"),
-                                        "Total Points": st.column_config.NumberColumn("Total Points", width="small", format="%d")
-                                    }
-                                )
-                                
-                                # Download points data
-                                points_csv = points_summary['points_df'][['User ID', 'Wallet Address', 'Assigned District', 'Base Points', 'Bonus Points', 'Total Points']].to_csv(index=False)
                                 st.download_button(
                                     label="📥 Download Points Data (CSV)",
                                     data=points_csv,
@@ -1088,51 +1256,52 @@ else:
                 summary_df = pd.DataFrame(summary_data)
                 st.dataframe(summary_df, hide_index=True, width='stretch')
         
-        # Final Points Summary - Aggregate all points from vote1a and vote1b
+        # Final Points Summary - Aggregate all points from all votes
         if participants_df is not None and len(participants_df) > 0:
-            vote1a_data = st.session_state.vote_data.get('vote1a')
-            vote1b_data = st.session_state.vote_data.get('vote1b')
+            # Check if we have any scored votes
+            scored_vote_keys = ['vote1a', 'vote1b', 'vote2a', 'vote2b', 'vote2c', 'vote2d']
+            has_scored_votes = any(st.session_state.vote_data.get(key) is not None for key in scored_vote_keys)
             
-            if vote1a_data is not None or vote1b_data is not None:
+            if has_scored_votes:
                 st.divider()
                 st.header("🏆 Final Points Summary")
-                st.caption("Aggregated points from all votes (Vote 1a and Vote 1b)")
+                st.caption("Aggregated points from all votes")
                 
                 # Initialize final points dataframe
                 final_points_df = participants_df.copy()
-                final_points_df['Vote 1a Points'] = 0
-                final_points_df['Vote 1b Points'] = 0
+                for vote_key in scored_vote_keys:
+                    final_points_df[f'{vote_key.upper()} Points'] = 0
                 final_points_df['Total Points'] = 0
                 
-                # Calculate and add Vote 1a points
-                if vote1a_data is not None:
-                    results_1a = calculate_vote_results(vote1a_data, VOTE_CONFIGS['vote1a'], participants_df)
-                    if results_1a:
-                        points_1a = calculate_vote1a_points(results_1a['results_df'], participants_df)
-                        if points_1a:
-                            # Merge points from vote1a
-                            for _, row in points_1a['points_df'].iterrows():
-                                user_id = row['User ID']
-                                total_points_1a = row['Total Points']
-                                idx = final_points_df.index[final_points_df['User ID'] == user_id].tolist()
-                                if idx:
-                                    final_points_df.loc[idx[0], 'Vote 1a Points'] = total_points_1a
-                                    final_points_df.loc[idx[0], 'Total Points'] += total_points_1a
-                
-                # Calculate and add Vote 1b points
-                if vote1b_data is not None:
-                    results_1b = calculate_vote_results(vote1b_data, VOTE_CONFIGS['vote1b'], participants_df)
-                    if results_1b:
-                        points_1b = calculate_vote1b_points(results_1b['results_df'], participants_df)
-                        if points_1b:
-                            # Merge points from vote1b
-                            for _, row in points_1b['points_df'].iterrows():
-                                user_id = row['User ID']
-                                total_points_1b = row['Total Points']
-                                idx = final_points_df.index[final_points_df['User ID'] == user_id].tolist()
-                                if idx:
-                                    final_points_df.loc[idx[0], 'Vote 1b Points'] = total_points_1b
-                                    final_points_df.loc[idx[0], 'Total Points'] += total_points_1b
+                # Calculate and add points for each vote
+                for vote_key in scored_vote_keys:
+                    vote_data = st.session_state.vote_data.get(vote_key)
+                    if vote_data is not None:
+                        results = calculate_vote_results(vote_data, VOTE_CONFIGS[vote_key], participants_df)
+                        if results:
+                            # Calculate points based on vote type
+                            if vote_key == 'vote1a':
+                                points_summary = calculate_vote1a_points(results['results_df'], participants_df)
+                                points_col = 'Total Points'
+                            elif vote_key == 'vote1b':
+                                points_summary = calculate_vote1b_points(results['results_df'], participants_df)
+                                points_col = 'Total Points'
+                            elif vote_key in ['vote2a', 'vote2b', 'vote2c', 'vote2d']:
+                                points_summary = calculate_vote2_points(results['results_df'], participants_df, vote_key)
+                                points_col = 'Points'
+                            else:
+                                points_summary = None
+                                points_col = None
+                            
+                            if points_summary:
+                                # Merge points
+                                for _, row in points_summary['points_df'].iterrows():
+                                    user_id = row['User ID']
+                                    points = row[points_col]
+                                    idx = final_points_df.index[final_points_df['User ID'] == user_id].tolist()
+                                    if idx:
+                                        final_points_df.loc[idx[0], f'{vote_key.upper()} Points'] = points
+                                        final_points_df.loc[idx[0], 'Total Points'] += points
                 
                 # Sort by total points
                 final_points_df = final_points_df.sort_values('Total Points', ascending=False)
@@ -1143,24 +1312,30 @@ else:
                     lambda x: f"{x[:6]}...{x[-4:]}" if pd.notna(x) and len(str(x)) > 10 else x
                 )
                 
+                # Select columns to display (only votes that have data)
+                display_columns = ['User ID', 'Wallet Address']
+                for vote_key in scored_vote_keys:
+                    if st.session_state.vote_data.get(vote_key) is not None:
+                        display_columns.append(f'{vote_key.upper()} Points')
+                display_columns.append('Total Points')
+                
                 # Display final leaderboard
                 st.markdown("#### Final Points Leaderboard")
                 st.dataframe(
-                    display_final_df[['User ID', 'Wallet Address', 'Vote 1a Points', 'Vote 1b Points', 'Total Points']],
+                    display_final_df[display_columns],
                     width='stretch',
                     hide_index=True,
                     height=min(600, 50 + len(display_final_df) * 40),
                     column_config={
                         "User ID": st.column_config.NumberColumn("User ID", width="small"),
                         "Wallet Address": st.column_config.TextColumn("Wallet Address", width="medium"),
-                        "Vote 1a Points": st.column_config.NumberColumn("Vote 1a Points", width="small", format="%d"),
-                        "Vote 1b Points": st.column_config.NumberColumn("Vote 1b Points", width="small", format="%d"),
-                        "Total Points": st.column_config.NumberColumn("Total Points", width="small", format="%d")
+                        **{col: st.column_config.NumberColumn(col, width="small", format="%d") 
+                           for col in display_columns if col not in ['User ID', 'Wallet Address']}
                     }
                 )
                 
                 # Download final points data
-                final_csv = final_points_df[['User ID', 'Wallet Address', 'Vote 1a Points', 'Vote 1b Points', 'Total Points']].to_csv(index=False)
+                final_csv = final_points_df[display_columns].to_csv(index=False)
                 st.download_button(
                     label="📥 Download Final Points Summary (CSV)",
                     data=final_csv,
