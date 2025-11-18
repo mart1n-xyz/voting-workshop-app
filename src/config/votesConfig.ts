@@ -5,7 +5,7 @@
  * and voting flow settings for the workshop.
  */
 
-export const VOTING_CONTRACT_ADDRESS = "0x0918E5b67187400548571D372D381C4bB4B9B27b";
+export const VOTING_CONTRACT_ADDRESS = "0xBA2741D011e34F154FF6E886e051c4278aC8B9AF";
 
 export type VoteType = "public" | "private";
 
