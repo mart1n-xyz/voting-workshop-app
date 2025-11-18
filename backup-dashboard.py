@@ -422,6 +422,45 @@ else:
                         st.caption(f"Total: {len(votes_df)} votes")
                     else:
                         st.info("No votes recorded yet.")
+                
+                # If private, show encrypted votes
+                elif not is_public and vote_count > 0:
+                    st.divider()
+                    st.subheader("🔒 Private Votes (Encrypted)")
+                    
+                    with st.spinner("Loading encrypted votes..."):
+                        try:
+                            # Get all private votes (encrypted)
+                            private_votes = contract.functions.getAllPrivateVotes(query_election_id).call()
+                            private_user_ids = private_votes[0]
+                            encrypted_signatures = private_votes[1]
+                            
+                            if len(private_user_ids) > 0:
+                                # Create votes dataframe with encrypted data
+                                private_votes_df = pd.DataFrame({
+                                    'User ID': [int(uid) for uid in private_user_ids],
+                                    'Encrypted Data (Hex)': [sig.hex() for sig in encrypted_signatures]
+                                })
+                                
+                                # Sort by User ID for better readability
+                                private_votes_df = private_votes_df.sort_values('User ID').reset_index(drop=True)
+                                
+                                # Display table
+                                st.info(f"🔐 Showing {len(private_votes_df)} encrypted vote(s). Data is encrypted and requires decryption to view actual choices.")
+                                
+                                st.dataframe(
+                                    private_votes_df,
+                                    use_container_width=True,
+                                    hide_index=True,
+                                    height=min(400, 50 + len(private_votes_df) * 35)
+                                )
+                                
+                                st.caption(f"Total: {len(private_votes_df)} encrypted vote(s)")
+                            else:
+                                st.info("No encrypted votes recorded yet.")
+                                
+                        except Exception as e:
+                            st.warning(f"⚠️ Could not fetch encrypted votes: {str(e)}")
             
             except Exception as e:
                 if "execution reverted" in str(e).lower() or "invalid election" in str(e).lower():
