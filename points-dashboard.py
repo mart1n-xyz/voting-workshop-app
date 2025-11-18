@@ -9,6 +9,7 @@ from web3 import Web3
 from eth_account import Account
 import pandas as pd
 from datetime import datetime
+import random
 
 # Page configuration
 st.set_page_config(
@@ -1344,4 +1345,95 @@ else:
                     key="download_final_points",
                     width='stretch'
                 )
+                
+                # Winners Section
+                st.divider()
+                st.header("🏆 Winners")
+                
+                # Use a fixed seed for consistency
+                SEED = "voting_workshop_2024"
+                random.seed(SEED)
+                
+                # Get top 3 winners (handle ties with seeded randomness)
+                # Group by total points and sort
+                sorted_df = final_points_df.sort_values('Total Points', ascending=False)
+                
+                # Get unique point values in descending order
+                unique_points = sorted_df['Total Points'].unique()
+                
+                top_3_winners = []
+                for points_value in unique_points:
+                    if len(top_3_winners) >= 3:
+                        break
+                    
+                    # Get all participants with this point value
+                    tied_participants = sorted_df[sorted_df['Total Points'] == points_value].copy()
+                    
+                    # If there's a tie, shuffle using seeded random
+                    if len(tied_participants) > 1:
+                        # Create a list of indices and shuffle with seed
+                        indices = list(tied_participants.index)
+                        random.shuffle(indices)
+                        tied_participants = tied_participants.reindex(indices)
+                    
+                    # Add participants until we have 3
+                    for _, row in tied_participants.iterrows():
+                        if len(top_3_winners) >= 3:
+                            break
+                        top_3_winners.append({
+                            'User ID': row['User ID'],
+                            'Wallet Address': row['Wallet Address'],
+                            'Total Points': row['Total Points']
+                        })
+                
+                # Display top 3 winners
+                st.markdown("#### 🥇 Top 3 Winners")
+                if len(top_3_winners) > 0:
+                    winners_data = []
+                    medals = ['🥇', '🥈', '🥉']
+                    for idx, winner in enumerate(top_3_winners):
+                        winners_data.append({
+                            'Rank': f"{medals[idx] if idx < 3 else ''} {idx + 1}",
+                            'User ID': winner['User ID'],
+                            'Wallet Address': f"{winner['Wallet Address'][:6]}...{winner['Wallet Address'][-4:]}",
+                            'Total Points': winner['Total Points']
+                        })
+                    
+                    winners_df = pd.DataFrame(winners_data)
+                    st.dataframe(
+                        winners_df,
+                        width='stretch',
+                        hide_index=True,
+                        column_config={
+                            "Rank": st.column_config.TextColumn("Rank", width="small"),
+                            "User ID": st.column_config.NumberColumn("User ID", width="small"),
+                            "Wallet Address": st.column_config.TextColumn("Wallet Address", width="medium"),
+                            "Total Points": st.column_config.NumberColumn("Total Points", width="small", format="%d")
+                        }
+                    )
+                else:
+                    st.info("No winners to display")
+                
+                # Random participant selection (using seeded randomness)
+                st.markdown("#### 🎲 Random Participant (Bonus Reward)")
+                random.seed(SEED + "_random_participant")  # Different seed for random participant
+                
+                # Select a random participant from all participants
+                all_participants = final_points_df.copy()
+                if len(all_participants) > 0:
+                    random_idx = random.randint(0, len(all_participants) - 1)
+                    random_participant = all_participants.iloc[random_idx]
+                    
+                    st.success(f"**Selected Participant:**")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("User ID", random_participant['User ID'])
+                    with col2:
+                        st.metric("Wallet Address", f"{random_participant['Wallet Address'][:6]}...{random_participant['Wallet Address'][-4:]}")
+                    with col3:
+                        st.metric("Total Points", random_participant['Total Points'])
+                    
+                    st.caption("This participant will receive a bonus reward regardless of their point balance.")
+                else:
+                    st.info("No participants available for random selection")
 
