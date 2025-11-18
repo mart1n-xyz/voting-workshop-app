@@ -7,11 +7,15 @@ import streamlit as st
 import json
 from web3 import Web3
 from eth_account import Account
+from eth_account.messages import encode_defunct
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import time
 from datetime import datetime
+import base64
+import nacl.public
+import nacl.utils
 
 # Page configuration
 st.set_page_config(
@@ -93,6 +97,9 @@ CONTRACT_ADDRESS = "0x0918E5b67187400548571D372D381C4bB4B9B27b"
 # Default RPC endpoint
 DEFAULT_RPC_URL = "https://public.sepolia.rpc.status.network"
 
+# Decryption key for private votes (Base64 encoded)
+DECRYPTION_KEY = "UgsmFEqNQrYE32riH1Ph0mBV7g2IVQ1FIXPEbTyb0zY="
+
 # Contract ABI (simplified - only the functions we need)
 CONTRACT_ABI = json.loads('''[
     {
@@ -171,6 +178,30 @@ CONTRACT_ABI = json.loads('''[
         ],
         "stateMutability": "view",
         "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "name": "idToAddress",
+        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "name": "addressToId",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "uint256", "name": "electionId", "type": "uint256"}],
+        "name": "getAllPrivateVotes",
+        "outputs": [
+            {"internalType": "uint256[]", "name": "userIds", "type": "uint256[]"},
+            {"internalType": "bytes[]", "name": "signatures", "type": "bytes[]"}
+        ],
+        "stateMutability": "view",
+        "type": "function"
     }
 ]''')
 
@@ -186,6 +217,136 @@ VOTE_CONFIGS = {
     8: {"name": "Vote 3: Merit vs Luck", "type": "public", "options": 2},
 }
 
+# Vote options for verification (must match what users signed)
+PRIVATE_VOTE_OPTIONS = {
+    3: [  # Vote 1b
+        "I vote for District A",
+        "I vote for District B",
+        "I vote for District C",
+        "I vote for District D",
+    ],
+    6: [  # Vote 2c
+        "I vote for A – Citywide Campaign (Marketing)",
+        "I vote for B – Process Upgrade (Operations)",
+        "I vote for C – Community Program (Community)",
+        "I vote for D – Shared Hub (Everyone)",
+    ],
+    7: [  # Vote 2d
+        "I vote for A – Citywide Campaign (Marketing)",
+        "I vote for B – Process Upgrade (Operations)",
+        "I vote for C – Community Program (Community)",
+        "I vote for D – Shared Hub (Everyone, bonus if ≥50%)",
+    ],
+}
+
+# Decryption functions
+def extract_encrypted_signature(tx_input_data):
+    """Extract encrypted signature from transaction input data"""
+    hex_data = tx_input_data.hex() if isinstance(tx_input_data, bytes) else tx_input_data
+    if hex_data.startswith('0x'):
+        hex_data = hex_data[2:]
+    
+    # Parse transaction format:
+    # Function selector: 4 bytes (8 hex chars)
+    # Election ID: 32 bytes (64 hex chars)
+    # Offset: 32 bytes (64 hex chars)
+    # Length: 32 bytes at position 136-200
+    length_hex = hex_data[136:200]
+    length = int(length_hex, 16)
+    
+    # Encrypted signature starts at position 200
+    encrypted_hex = hex_data[200:200 + (length * 2)]
+    
+    # Convert hex to bytes
+    encrypted_bytes = bytes.fromhex(encrypted_hex)
+    
+    # Convert to base64
+    return base64.b64encode(encrypted_bytes).decode('utf-8')
+
+def decrypt_signature(encrypted_base64, private_key_base64):
+    """Decrypt an encrypted signature using the private key"""
+    try:
+        # Decode private key
+        private_key_bytes = base64.b64decode(private_key_base64)
+        
+        if len(private_key_bytes) != 32:
+            raise ValueError(f"Invalid private key length: {len(private_key_bytes)} bytes (expected 32)")
+        
+        # Decode encrypted message
+        full_message = base64.b64decode(encrypted_base64)
+        
+        # Extract components
+        ephemeral_public_key = full_message[0:32]
+        nonce = full_message[32:56]
+        encrypted = full_message[56:]
+        
+        # Create NaCl box for decryption
+        private_key = nacl.public.PrivateKey(private_key_bytes)
+        public_key = nacl.public.PublicKey(ephemeral_public_key)
+        box = nacl.public.Box(private_key, public_key)
+        
+        # Decrypt
+        decrypted = box.decrypt(encrypted, nonce)
+        
+        # Convert to string (should be hex signature)
+        signature = decrypted.decode('utf-8')
+        
+        return signature
+    except Exception as e:
+        raise Exception(f"Decryption error: {str(e)}")
+
+def verify_vote_signature(signature, voter_address, options):
+    """Verify which option a signature corresponds to"""
+    try:
+        # Try each option
+        for i, message in enumerate(options):
+            try:
+                # Encode the message
+                encoded_message = encode_defunct(text=message)
+                
+                # Recover the address from the signature
+                recovered_address = Account.recover_message(encoded_message, signature=signature)
+                
+                # Check if it matches the voter address
+                if recovered_address.lower() == voter_address.lower():
+                    return {
+                        'optionIndex': i,
+                        'optionText': message,
+                        'choice': i + 1  # 1-indexed for display
+                    }
+            except:
+                # This option doesn't match, continue
+                continue
+        
+        # No match found
+        return None
+    except Exception as e:
+        raise Exception(f"Signature verification error: {str(e)}")
+
+def decrypt_and_verify_vote(encrypted_bytes, voter_address, private_key_base64, options):
+    """Complete flow: Decrypt and verify a vote from contract bytes"""
+    try:
+        # encrypted_bytes is already the encrypted signature from contract (bytes)
+        # Convert to base64 if needed
+        if isinstance(encrypted_bytes, bytes):
+            encrypted_signature = base64.b64encode(encrypted_bytes).decode('utf-8')
+        else:
+            encrypted_signature = encrypted_bytes
+        
+        # Step 1: Decrypt signature
+        decrypted_signature = decrypt_signature(encrypted_signature, private_key_base64)
+        
+        # Step 2: Verify which option was voted for
+        vote = verify_vote_signature(decrypted_signature, voter_address, options)
+        
+        return {
+            'encryptedSignature': encrypted_signature,
+            'decryptedSignature': decrypted_signature,
+            'vote': vote
+        }
+    except Exception as e:
+        raise Exception(f"Failed to decrypt and verify vote: {str(e)}")
+
 # Initialize session state
 if 'web3' not in st.session_state:
     st.session_state.web3 = None
@@ -195,8 +356,10 @@ if 'contract' not in st.session_state:
     st.session_state.contract = None
 if 'last_refresh' not in st.session_state:
     st.session_state.last_refresh = None
+if 'decryption_key' not in st.session_state:
+    st.session_state.decryption_key = None
 
-def initialize_web3(rpc_url: str, private_key: str):
+def initialize_web3(rpc_url: str, private_key: str, decryption_key: str = None):
     """Initialize Web3 connection and account"""
     try:
         with st.spinner("Connecting to blockchain..."):
@@ -230,12 +393,40 @@ def initialize_web3(rpc_url: str, private_key: str):
             st.session_state.web3 = w3
             st.session_state.account = account
             st.session_state.contract = contract
+            st.session_state.decryption_key = decryption_key
             st.session_state.last_refresh = datetime.now()
             
             return True
     except Exception as e:
         st.error(f"❌ Error initializing Web3: {str(e)}")
         return False
+
+def get_user_address_from_id(contract, user_id):
+    """Get user address from user ID"""
+    try:
+        # Try to call userAddresses mapping
+        # Note: We need to add this to the ABI if not present
+        # For now, we'll need to track this differently
+        return None
+    except:
+        return None
+
+def fetch_private_votes(w3, contract_address, election_id, from_block=0):
+    """Fetch all castPrivateVote transactions for a given election"""
+    try:
+        # Get logs for castPrivateVote events or fetch transactions
+        # We need to filter transactions that called castPrivateVote
+        latest_block = w3.eth.block_number
+        
+        votes = []
+        # This is a simplified approach - in production you'd want to use events
+        # For now, we'll fetch transactions from recent blocks
+        # A better approach would be to have the contract emit events
+        
+        return votes
+    except Exception as e:
+        st.error(f"Error fetching private votes: {str(e)}")
+        return []
 
 def get_election_status(election_data):
     """Parse election status"""
@@ -317,7 +508,7 @@ st.title("🗳️ Voting Workshop Management Dashboard")
 if not st.session_state.account:
     st.subheader("🔌 Connect to Blockchain")
     
-    col1, col2, col3 = st.columns([2, 2, 1])
+    col1, col2 = st.columns([2, 2])
     
     with col1:
         # Try to load from secrets first
@@ -335,21 +526,21 @@ if not st.session_state.account:
     
     with col2:
         private_key = st.text_input(
-            "Private Key",
+            "Wallet Private Key",
             type="password",
             help="Your wallet private key (owner only)"
         )
     
-    with col3:
-        st.write("")  # Spacing
-        st.write("")  # Spacing
-        if st.button("🔌 Connect", type="primary", width='stretch'):
-            if not private_key:
-                st.error("Please enter your private key")
-            else:
-                if initialize_web3(rpc_url, private_key):
-                    st.success(f"✅ Connected!")
-                    st.rerun()
+    if st.button("🔌 Connect", type="primary", use_container_width=False):
+        if not private_key:
+            st.error("Please enter your wallet private key")
+        else:
+            # Use hardcoded decryption key
+            if initialize_web3(rpc_url, private_key, DECRYPTION_KEY):
+                st.success(f"✅ Connected!")
+                if DECRYPTION_KEY:
+                    st.info("🔐 Private vote decryption enabled")
+                st.rerun()
     
     st.divider()
     st.caption(f"Contract: {CONTRACT_ADDRESS} | Network: Status Sepolia")
@@ -688,23 +879,212 @@ if st.session_state.web3 and st.session_state.contract:
                             st.write("")
                 
                 elif config['type'] == 'private' and vote_count > 0:
-                    # Private vote placeholder with better styling
-                    col1, col2 = st.columns([2, 1])
+                    # Private vote with decryption
+                    can_decrypt = st.session_state.decryption_key is not None and len(st.session_state.decryption_key) > 0
                     
-                    with col1:
-                        st.markdown("""
-                        <div style="padding: 2rem; border-radius: 0.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-align: center;">
-                            <div style="font-size: 3rem; margin-bottom: 1rem;">🔐</div>
-                            <div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem;">Private Election</div>
-                            <div style="font-size: 0.9rem; opacity: 0.9;">Results are encrypted and require decryption key</div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                    if can_decrypt:
+                        # Try to decrypt votes
+                        try:
+                            with st.spinner("Decrypting votes..."):
+                                # Fetch encrypted votes from contract
+                                vote_data = contract.functions.getAllPrivateVotes(election_id).call()
+                                user_ids = vote_data[0]
+                                encrypted_sigs = vote_data[1]
+                                
+                                # Decrypt each vote
+                                decrypted_votes = []
+                                vote_counts = [0] * config['options']
+                                voters_by_choice = {}
+                                
+                                for i, (user_id, encrypted_sig) in enumerate(zip(user_ids, encrypted_sigs)):
+                                    try:
+                                        # Get voter address from user ID
+                                        voter_address = contract.functions.idToAddress(user_id).call()
+                                        
+                                        # Decrypt and verify vote
+                                        result = decrypt_and_verify_vote(
+                                            encrypted_sig,
+                                            voter_address,
+                                            st.session_state.decryption_key,
+                                            PRIVATE_VOTE_OPTIONS[election_id]
+                                        )
+                                        
+                                        if result['vote']:
+                                            choice = result['vote']['choice']
+                                            vote_counts[choice - 1] += 1
+                                            
+                                            if choice not in voters_by_choice:
+                                                voters_by_choice[choice] = []
+                                            voters_by_choice[choice].append(int(user_id))
+                                            
+                                            decrypted_votes.append({
+                                                'user_id': int(user_id),
+                                                'choice': choice,
+                                                'option_text': result['vote']['optionText']
+                                            })
+                                    except Exception as e:
+                                        st.warning(f"Could not decrypt vote from user #{user_id}: {str(e)}")
+                                        continue
+                                
+                                # Display results similar to public votes
+                                option_labels = []
+                                if config['options'] == 4:
+                                    if "District" in config['name'] or "Coordination" in config['name']:
+                                        option_labels = ["District A", "District B", "District C", "District D"]
+                                    else:
+                                        option_labels = ["Option A", "Option B", "Option C", "Option D"]
+                                else:
+                                    option_labels = [f"Option {i+1}" for i in range(config['options'])]
+                                
+                                # Create results dataframe
+                                df = pd.DataFrame({
+                                    'Option': option_labels,
+                                    'Votes': vote_counts,
+                                    'VoterIDs': [voters_by_choice.get(i+1, []) for i in range(len(option_labels))]
+                                })
+                                
+                                # Calculate percentages
+                                df['Percentage'] = (df['Votes'] / vote_count * 100).round(1) if vote_count > 0 else 0
+                                
+                                # Find winner
+                                max_votes = df['Votes'].max()
+                                winners = df[df['Votes'] == max_votes]['Option'].tolist()
+                                
+                                # Create modern visualization with Plotly
+                                col1, col2 = st.columns([2, 1])
+                                
+                                with col1:
+                                    # Create horizontal bar chart with Plotly
+                                    colors = ['#ff6b6b' if v == max_votes else '#a78bfa' for v in df['Votes']]
+                                    
+                                    fig = go.Figure(data=[
+                                        go.Bar(
+                                            y=df['Option'],
+                                            x=df['Votes'],
+                                            orientation='h',
+                                            marker=dict(
+                                                color=colors,
+                                                line=dict(color='rgba(0,0,0,0.1)', width=1)
+                                            ),
+                                            text=[f"{v} ({p:.1f}%)" for v, p in zip(df['Votes'], df['Percentage'])],
+                                            textposition='outside',
+                                            hovertemplate='<b>%{y}</b><br>Votes: %{x}<br><extra></extra>'
+                                        )
+                                    ])
+                                    
+                                    fig.update_layout(
+                                        title=dict(
+                                            text=f"🔐 Decrypted Results: {config['name']}",
+                                            font=dict(size=16, color='#333')
+                                        ),
+                                        xaxis_title="Number of Votes",
+                                        yaxis_title="",
+                                        height=max(300, len(option_labels) * 80),
+                                        margin=dict(l=20, r=100, t=60, b=40),
+                                        plot_bgcolor='rgba(0,0,0,0)',
+                                        paper_bgcolor='rgba(0,0,0,0)',
+                                        font=dict(size=12),
+                                        xaxis=dict(
+                                            showgrid=True,
+                                            gridcolor='rgba(0,0,0,0.05)'
+                                        ),
+                                        yaxis=dict(
+                                            showgrid=False,
+                                            categoryorder='total ascending'
+                                        )
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                
+                                with col2:
+                                    # Winner announcement
+                                    st.markdown("### 🏆 Result")
+                                    if len(winners) == 1:
+                                        st.success(f"**{winners[0]}**")
+                                        st.metric("Winning Votes", max_votes)
+                                        st.metric("Margin", f"{(df['Votes'].max() / vote_count * 100):.1f}%" if vote_count > 0 else "0%")
+                                    else:
+                                        st.info(f"**Tie**")
+                                        st.write(f"{', '.join(winners)}")
+                                        st.metric("Tied Votes", max_votes)
+                                    
+                                    st.divider()
+                                    st.metric("Total Votes", vote_count)
+                                    total_registered = contract.functions.getTotalRegistered().call()
+                                    st.metric("Turnout Rate", f"{(vote_count / total_registered * 100):.1f}%" if vote_count > 0 and total_registered > 0 else "0%")
+                                
+                                # Voter details hidden behind a non-obvious element
+                                # Use a subtle "..." button or small text
+                                st.write("")  # spacing
+                                if st.button("⋯", key=f"reveal_private_{election_id}", help="Show detailed voter breakdown"):
+                                    st.session_state[f"show_private_details_{election_id}"] = not st.session_state.get(f"show_private_details_{election_id}", False)
+                                
+                                # Show details if button was clicked
+                                if st.session_state.get(f"show_private_details_{election_id}", False):
+                                    st.markdown("---")
+                                    st.caption("🔓 **Decrypted Voter Breakdown**")
+                                    
+                                    for i, row in df.iterrows():
+                                        label = row['Option']
+                                        votes = row['Votes']
+                                        percentage = row['Percentage']
+                                        voter_ids = row['VoterIDs']
+                                        
+                                        # Create a nice card for each option
+                                        st.markdown(f"""
+                                        <div style="padding: 0.75rem; border-radius: 0.5rem; background-color: #f3f4f6; margin-bottom: 0.5rem; border-left: 4px solid {'#ff6b6b' if votes == max_votes else '#a78bfa'};">
+                                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                                <div style="font-weight: 600; font-size: 1rem;">{label}</div>
+                                                <div style="font-weight: 500; color: #6c757d;">{votes} votes ({percentage:.1f}%)</div>
+                                            </div>
+                                        </div>
+                                        """, unsafe_allow_html=True)
+                                        
+                                        if voter_ids:
+                                            voter_ids_str = ", ".join([f"#{vid}" for vid in sorted(voter_ids)])
+                                            st.caption(f"Voters: {voter_ids_str}")
+                                        else:
+                                            st.caption("No votes")
+                                        
+                                        st.write("")
+                        
+                        except Exception as e:
+                            st.error(f"Error decrypting votes: {str(e)}")
+                            # Fall back to showing encrypted state
+                            col1, col2 = st.columns([2, 1])
+                            
+                            with col1:
+                                st.markdown("""
+                                <div style="padding: 2rem; border-radius: 0.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-align: center;">
+                                    <div style="font-size: 3rem; margin-bottom: 1rem;">🔐</div>
+                                    <div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem;">Private Election</div>
+                                    <div style="font-size: 0.9rem; opacity: 0.9;">Decryption failed - check your key</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            with col2:
+                                st.metric("Encrypted Votes", vote_count)
+                                st.metric("Status", "Sealed" if status == "Closed" else "Open")
+                                st.caption("Decryption key required")
                     
-                    with col2:
-                        st.metric("Encrypted Votes", vote_count)
-                        st.metric("Status", "Sealed" if status == "Closed" else "Open")
-                        if status == "Closed":
-                            st.info("Results can be decrypted with the private key")
+                    else:
+                        # No decryption key provided
+                        col1, col2 = st.columns([2, 1])
+                        
+                        with col1:
+                            st.markdown("""
+                            <div style="padding: 2rem; border-radius: 0.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-align: center;">
+                                <div style="font-size: 3rem; margin-bottom: 1rem;">🔐</div>
+                                <div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem;">Private Election</div>
+                                <div style="font-size: 0.9rem; opacity: 0.9;">Results are encrypted and require decryption key</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        with col2:
+                            st.metric("Encrypted Votes", vote_count)
+                            st.metric("Status", "Sealed" if status == "Closed" else "Open")
+                            if status == "Closed":
+                                st.info("💡 Decryption key required")
                 
                 elif vote_count == 0:
                     st.info("🗳️ No votes cast yet for this election")
@@ -736,11 +1116,13 @@ else:
         - 🔐 Manage both public and private votes
         
         **To get started:**
-        1. Enter your RPC URL in the sidebar
-        2. Enter your private key (contract owner only)
+        1. Enter your RPC URL
+        2. Enter your wallet private key (contract owner only)
         3. Click "Connect"
         
-        **Security Note:** Your private key is only stored in memory during your session.
+        **Private Vote Decryption:** Enabled by default for private elections.
+        
+        **Security Note:** Keys are only stored in memory during your session.
         """)
     
     with col2:
