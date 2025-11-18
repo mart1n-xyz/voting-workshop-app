@@ -7,10 +7,13 @@ import streamlit as st
 import json
 from web3 import Web3
 from eth_account import Account
+from eth_account.messages import encode_defunct
 import pandas as pd
 import plotly.graph_objects as go
 import time
 from datetime import datetime
+import base64
+import nacl.public
 
 # Page configuration
 st.set_page_config(
@@ -91,6 +94,103 @@ CONTRACT_ADDRESS = "0x0918E5b67187400548571D372D381C4bB4B9B27b"
 
 # Default RPC endpoint
 DEFAULT_RPC_URL = "https://public.sepolia.rpc.status.network"
+
+# Default decryption key (Base64 encoded)
+DEFAULT_DECRYPTION_KEY = "UgsmFEqNQrYE32riH1Ph0mBV7g2IVQ1FIXPEbTyb0zY="
+
+# Vote options for verification (must match what users signed)
+# Common options - can be customized per election
+DEFAULT_VOTE_OPTIONS = [
+    "I vote for District A",
+    "I vote for District B",
+    "I vote for District C",
+    "I vote for District D",
+]
+
+# Decryption functions
+def decrypt_signature(encrypted_base64, private_key_base64):
+    """Decrypt an encrypted signature using the private key"""
+    try:
+        # Decode private key
+        private_key_bytes = base64.b64decode(private_key_base64)
+        
+        if len(private_key_bytes) != 32:
+            raise ValueError(f"Invalid private key length: {len(private_key_bytes)} bytes (expected 32)")
+        
+        # Decode encrypted message
+        full_message = base64.b64decode(encrypted_base64)
+        
+        # Extract components
+        ephemeral_public_key = full_message[0:32]
+        nonce = full_message[32:56]
+        encrypted = full_message[56:]
+        
+        # Create NaCl box for decryption
+        private_key = nacl.public.PrivateKey(private_key_bytes)
+        public_key = nacl.public.PublicKey(ephemeral_public_key)
+        box = nacl.public.Box(private_key, public_key)
+        
+        # Decrypt
+        decrypted = box.decrypt(encrypted, nonce)
+        
+        # Convert to string (should be hex signature)
+        signature = decrypted.decode('utf-8')
+        
+        return signature
+    except Exception as e:
+        raise Exception(f"Decryption error: {str(e)}")
+
+def verify_vote_signature(signature, voter_address, options):
+    """Verify which option a signature corresponds to"""
+    try:
+        # Try each option
+        for i, message in enumerate(options):
+            try:
+                # Encode the message
+                encoded_message = encode_defunct(text=message)
+                
+                # Recover the address from the signature
+                recovered_address = Account.recover_message(encoded_message, signature=signature)
+                
+                # Check if it matches the voter address
+                if recovered_address.lower() == voter_address.lower():
+                    return {
+                        'optionIndex': i,
+                        'optionText': message,
+                        'choice': i + 1  # 1-indexed for display
+                    }
+            except Exception:
+                # This option doesn't match, continue
+                continue
+        
+        # No match found
+        return None
+    except Exception as e:
+        raise Exception(f"Signature verification error: {str(e)}")
+
+def decrypt_and_verify_vote(encrypted_bytes, voter_address, private_key_base64, options):
+    """Complete flow: Decrypt and verify a vote from contract bytes"""
+    try:
+        # encrypted_bytes is already the encrypted signature from contract (bytes)
+        # Convert to base64 if needed
+        if isinstance(encrypted_bytes, bytes):
+            encrypted_signature = base64.b64encode(encrypted_bytes).decode('utf-8')
+        else:
+            encrypted_signature = encrypted_bytes
+        
+        # Step 1: Decrypt signature
+        decrypted_signature = decrypt_signature(encrypted_signature, private_key_base64)
+        
+        # Step 2: Verify which option was voted for
+        vote = verify_vote_signature(decrypted_signature, voter_address, options)
+        
+        return {
+            'encryptedSignature': encrypted_signature,
+            'decryptedSignature': decrypted_signature,
+            'vote': vote
+        }
+    except Exception as e:
+        raise Exception(f"Failed to decrypt and verify vote: {str(e)}")
 
 # Contract ABI (full ABI from deployed contract)
 CONTRACT_ABI = json.loads('''[{"inputs":[],"stateMutability":"nonpayable","type":"constructor"},{"inputs":[{"internalType":"address","name":"owner","type":"address"}],"name":"OwnableInvalidOwner","type":"error"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"OwnableUnauthorizedAccount","type":"error"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"electionId","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"timestamp","type":"uint256"}],"name":"ElectionClosed","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"electionId","type":"uint256"},{"indexed":false,"internalType":"bool","name":"isPublic","type":"bool"},{"indexed":false,"internalType":"uint256","name":"timestamp","type":"uint256"}],"name":"ElectionOpened","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"previousOwner","type":"address"},{"indexed":true,"internalType":"address","name":"newOwner","type":"address"}],"name":"OwnershipTransferred","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"electionId","type":"uint256"},{"indexed":true,"internalType":"uint256","name":"userId","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"timestamp","type":"uint256"}],"name":"PrivateVoteCast","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"electionId","type":"uint256"},{"indexed":true,"internalType":"uint256","name":"userId","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"choice","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"timestamp","type":"uint256"}],"name":"PublicVoteCast","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"user","type":"address"},{"indexed":true,"internalType":"uint256","name":"userId","type":"uint256"}],"name":"UserRegistered","type":"event"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"addressToId","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"},{"internalType":"bytes","name":"encryptedSignature","type":"bytes"}],"name":"castPrivateVote","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"},{"internalType":"uint256","name":"choice","type":"uint256"}],"name":"castPublicVote","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"}],"name":"closeElection","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"electionIds","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"elections","outputs":[{"internalType":"uint256","name":"id","type":"uint256"},{"internalType":"enum VotingWorkshop.ElectionStatus","name":"status","type":"uint8"},{"internalType":"bool","name":"isPublic","type":"bool"},{"internalType":"uint256","name":"openedAt","type":"uint256"},{"internalType":"uint256","name":"closedAt","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"}],"name":"getAllPrivateVotes","outputs":[{"internalType":"uint256[]","name":"userIds","type":"uint256[]"},{"internalType":"bytes[]","name":"signatures","type":"bytes[]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"}],"name":"getAllPublicVotes","outputs":[{"internalType":"uint256[]","name":"userIds","type":"uint256[]"},{"internalType":"uint256[]","name":"choices","type":"uint256[]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"},{"internalType":"uint256","name":"choice","type":"uint256"}],"name":"getChoiceVoteCount","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"}],"name":"getElection","outputs":[{"components":[{"internalType":"uint256","name":"id","type":"uint256"},{"internalType":"enum VotingWorkshop.ElectionStatus","name":"status","type":"uint8"},{"internalType":"bool","name":"isPublic","type":"bool"},{"internalType":"uint256","name":"openedAt","type":"uint256"},{"internalType":"uint256","name":"closedAt","type":"uint256"}],"internalType":"struct VotingWorkshop.Election","name":"","type":"tuple"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"},{"internalType":"uint256","name":"numChoices","type":"uint256"}],"name":"getElectionResults","outputs":[{"internalType":"uint256[]","name":"counts","type":"uint256[]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"},{"internalType":"uint256","name":"userId","type":"uint256"}],"name":"getPrivateVote","outputs":[{"internalType":"bytes","name":"","type":"bytes"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"},{"internalType":"uint256","name":"startIndex","type":"uint256"},{"internalType":"uint256","name":"limit","type":"uint256"}],"name":"getPrivateVotesBatch","outputs":[{"internalType":"uint256[]","name":"userIds","type":"uint256[]"},{"internalType":"bytes[]","name":"signatures","type":"bytes[]"},{"internalType":"uint256","name":"total","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"},{"internalType":"uint256","name":"userId","type":"uint256"}],"name":"getPublicVote","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getTotalElections","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getTotalRegistered","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"}],"name":"getVoteCount","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"}],"name":"getVotersInElection","outputs":[{"internalType":"uint256[]","name":"","type":"uint256[]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"},{"internalType":"address","name":"userAddress","type":"address"}],"name":"hasUserVoted","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"},{"internalType":"uint256","name":"","type":"uint256"}],"name":"hasVoted","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"idToAddress","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"}],"name":"isElectionOpen","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"user","type":"address"}],"name":"isRegistered","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"electionId","type":"uint256"},{"internalType":"bool","name":"isPublic","type":"bool"}],"name":"openElection","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"},{"internalType":"uint256","name":"","type":"uint256"}],"name":"publicVotes","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"register","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"renounceOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"newOwner","type":"address"}],"name":"transferOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"},{"internalType":"uint256","name":"","type":"uint256"}],"name":"voteCountPerChoice","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]''')
@@ -186,7 +286,7 @@ if not st.session_state.account:
             help="Your wallet private key (owner only)"
         )
     
-    if st.button("🔌 Connect", type="primary", use_container_width=False):
+    if st.button("🔌 Connect", type="primary", width='content'):
         if not private_key:
             st.error("Please enter your wallet private key")
         else:
@@ -212,7 +312,7 @@ else:
             st.caption(f"Last refresh: {st.session_state.last_refresh.strftime('%H:%M:%S')}")
     
     with col4:
-        if st.button("🔄 Refresh", use_container_width=True):
+        if st.button("🔄 Refresh", width='stretch'):
             st.session_state.last_refresh = datetime.now()
             st.rerun()
     
@@ -247,7 +347,7 @@ else:
     
     with col_input3:
         st.markdown("<br>", unsafe_allow_html=True)  # Spacer for alignment
-        get_info_button = st.button("🔍 Get Info", type="primary", use_container_width=True)
+        get_info_button = st.button("🔍 Get Info", type="primary", width='stretch')
     
     # Always show results area
     results_container = st.container()
@@ -386,7 +486,7 @@ else:
                             fig.update_xaxes(gridcolor='rgba(128,128,128,0.2)')
                             fig.update_yaxes(gridcolor='rgba(128,128,128,0.2)')
                             
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, width='stretch')
                         
                         with col2:
                             # Display summary table
@@ -414,7 +514,7 @@ else:
                         # Display table
                         st.dataframe(
                             votes_df,
-                            use_container_width=True,
+                            width='stretch',
                             hide_index=True,
                             height=min(400, 50 + len(votes_df) * 35)
                         )
@@ -426,7 +526,26 @@ else:
                 # If private, show encrypted votes
                 elif not is_public and vote_count > 0:
                     st.divider()
-                    st.subheader("🔒 Private Votes (Encrypted)")
+                    st.subheader("🔒 Private Votes")
+                    
+                    # Decryption settings
+                    with st.expander("🔑 Decryption Settings", expanded=False):
+                        decryption_key = st.text_input(
+                            "Decryption Key (Base64)",
+                            value=DEFAULT_DECRYPTION_KEY,
+                            type="password",
+                            help="Base64 encoded private key for decryption"
+                        )
+                        
+                        # Vote options input
+                        st.markdown("**Vote Options (one per line, must match what users signed):**")
+                        vote_options_text = st.text_area(
+                            "Options",
+                            value="\n".join(DEFAULT_VOTE_OPTIONS),
+                            height=150,
+                            help="Enter vote options, one per line. Must exactly match what users signed."
+                        )
+                        vote_options = [opt.strip() for opt in vote_options_text.split("\n") if opt.strip()]
                     
                     with st.spinner("Loading encrypted votes..."):
                         try:
@@ -436,26 +555,103 @@ else:
                             encrypted_signatures = private_votes[1]
                             
                             if len(private_user_ids) > 0:
-                                # Create votes dataframe with encrypted data
-                                private_votes_df = pd.DataFrame({
+                                # First show encrypted data
+                                st.markdown("### 📦 Encrypted Data")
+                                encrypted_df = pd.DataFrame({
                                     'User ID': [int(uid) for uid in private_user_ids],
                                     'Encrypted Data (Hex)': [sig.hex() for sig in encrypted_signatures]
                                 })
-                                
-                                # Sort by User ID for better readability
-                                private_votes_df = private_votes_df.sort_values('User ID').reset_index(drop=True)
-                                
-                                # Display table
-                                st.info(f"🔐 Showing {len(private_votes_df)} encrypted vote(s). Data is encrypted and requires decryption to view actual choices.")
+                                encrypted_df = encrypted_df.sort_values('User ID').reset_index(drop=True)
                                 
                                 st.dataframe(
-                                    private_votes_df,
-                                    use_container_width=True,
+                                    encrypted_df,
+                                    width='stretch',
                                     hide_index=True,
-                                    height=min(400, 50 + len(private_votes_df) * 35)
+                                    height=min(300, 50 + len(encrypted_df) * 35)
                                 )
                                 
-                                st.caption(f"Total: {len(private_votes_df)} encrypted vote(s)")
+                                # Decrypt votes if key is provided
+                                if decryption_key and len(vote_options) > 0:
+                                    st.divider()
+                                    st.markdown("### 🔓 Decrypted Votes")
+                                    
+                                    with st.spinner("Decrypting votes..."):
+                                        decrypted_votes = []
+                                        failed_decrypts = []
+                                        
+                                        # Get voter addresses
+                                        user_id_to_address = {}
+                                        for user_id in private_user_ids:
+                                            try:
+                                                address = contract.functions.idToAddress(user_id).call()
+                                                user_id_to_address[int(user_id)] = address
+                                            except Exception as e:
+                                                st.warning(f"Could not fetch address for user #{user_id}: {str(e)}")
+                                        
+                                        # Decrypt each vote
+                                        for i, (user_id, encrypted_sig) in enumerate(zip(private_user_ids, encrypted_signatures)):
+                                            try:
+                                                user_address = user_id_to_address.get(int(user_id))
+                                                if not user_address:
+                                                    failed_decrypts.append({
+                                                        'User ID': int(user_id),
+                                                        'Error': 'Address not found'
+                                                    })
+                                                    continue
+                                                
+                                                # Decrypt and verify
+                                                result = decrypt_and_verify_vote(
+                                                    encrypted_sig,
+                                                    user_address,
+                                                    decryption_key,
+                                                    vote_options
+                                                )
+                                                
+                                                if result['vote']:
+                                                    decrypted_votes.append({
+                                                        'User ID': int(user_id),
+                                                        'Choice': f"Option {result['vote']['choice']}",
+                                                        'Vote Text': result['vote']['optionText']
+                                                    })
+                                                else:
+                                                    failed_decrypts.append({
+                                                        'User ID': int(user_id),
+                                                        'Error': 'Signature verification failed'
+                                                    })
+                                            except Exception as e:
+                                                failed_decrypts.append({
+                                                    'User ID': int(user_id),
+                                                    'Error': str(e)
+                                                })
+                                        
+                                        # Display decrypted votes
+                                        if decrypted_votes:
+                                            decrypted_df = pd.DataFrame(decrypted_votes)
+                                            decrypted_df = decrypted_df.sort_values('User ID').reset_index(drop=True)
+                                            
+                                            st.success(f"✅ Successfully decrypted {len(decrypted_votes)} vote(s)")
+                                            
+                                            st.dataframe(
+                                                decrypted_df,
+                                                width='stretch',
+                                                hide_index=True,
+                                                height=min(400, 50 + len(decrypted_df) * 35)
+                                            )
+                                            
+                                            st.caption(f"Total decrypted: {len(decrypted_votes)} vote(s)")
+                                        
+                                        # Show failed decryptions if any
+                                        if failed_decrypts:
+                                            st.warning(f"⚠️ Failed to decrypt {len(failed_decrypts)} vote(s)")
+                                            failed_df = pd.DataFrame(failed_decrypts)
+                                            st.dataframe(
+                                                failed_df,
+                                                width='stretch',
+                                                hide_index=True
+                                            )
+                                else:
+                                    st.info("💡 Enter decryption key and vote options above to decrypt votes.")
+                                
                             else:
                                 st.info("No encrypted votes recorded yet.")
                                 
